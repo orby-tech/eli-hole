@@ -20,15 +20,31 @@ defmodule EliHole.DNS.Adlists do
   def get!(id), do: Repo.get!(Adlist, id)
 
   def create(attrs) do
-    %Adlist{}
-    |> Adlist.changeset(attrs)
-    |> Repo.insert()
+    result =
+      %Adlist{}
+      |> Adlist.changeset(attrs)
+      |> Repo.insert()
+
+    case result do
+      {:ok, _} -> broadcast_change()
+      _ -> :ok
+    end
+
+    result
   end
 
   def update(%Adlist{} = adlist, attrs) do
-    adlist
-    |> Adlist.changeset(attrs)
-    |> Repo.update()
+    result =
+      adlist
+      |> Adlist.changeset(attrs)
+      |> Repo.update()
+
+    case result do
+      {:ok, _} -> broadcast_change()
+      _ -> :ok
+    end
+
+    result
   end
 
   def delete(%Adlist{} = adlist) do
@@ -36,6 +52,7 @@ defmodule EliHole.DNS.Adlists do
     Repo.delete_all(from e in BlocklistEntry, where: e.source == ^source)
     result = Repo.delete(adlist)
     Blocklist.flush_cache()
+    broadcast_change()
     result
   end
 
@@ -58,5 +75,9 @@ defmodule EliHole.DNS.Adlists do
       )
 
     %{total: total, enabled: enabled, total_domains: domains}
+  end
+
+  defp broadcast_change do
+    Phoenix.PubSub.broadcast(EliHole.PubSub, "dns:adlists", :adlists_changed)
   end
 end

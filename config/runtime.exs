@@ -23,10 +23,23 @@ end
 config :eli_hole, EliHoleWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PHX_PORT") || System.get_env("PORT") || "4000")]
 
+cluster_role =
+  case System.get_env("INSTANCE_ROLE") do
+    "master" -> :master
+    "slave" -> :slave
+    _ -> :standalone
+  end
+
 config :eli_hole,
   dns_port: String.to_integer(System.get_env("DNS_PORT") || "5354"),
   admin_username: System.get_env("ADMIN_USERNAME"),
-  admin_password: System.get_env("ADMIN_PASSWORD")
+  admin_password: System.get_env("ADMIN_PASSWORD"),
+  cluster_role: cluster_role,
+  cluster_api_key: System.get_env("CLUSTER_API_KEY"),
+  cluster_master_url: System.get_env("CLUSTER_MASTER_URL"),
+  cluster_instance_name:
+    System.get_env("INSTANCE_NAME") || "node-#{System.get_env("HOSTNAME") || "unknown"}",
+  cluster_instance_url: System.get_env("INSTANCE_URL")
 
 if dns_upstreams = System.get_env("DNS_UPSTREAMS") do
   upstreams =

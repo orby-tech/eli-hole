@@ -78,6 +78,12 @@ defmodule EliHoleWeb.Layouts do
             active={@active_nav == :local_dns}
           />
           <.nav_item
+            href={~p"/admin/cluster"}
+            icon="hero-server-stack"
+            label="Cluster"
+            active={@active_nav == :cluster}
+          />
+          <.nav_item
             href={~p"/admin/settings"}
             icon="hero-cog-6-tooth"
             label="Settings"
@@ -118,6 +124,9 @@ defmodule EliHoleWeb.Layouts do
             </.link>
             <.link navigate={~p"/admin/local-dns"} class="btn btn-ghost btn-sm">
               <.icon name="hero-map-pin" class="size-4" />
+            </.link>
+            <.link navigate={~p"/admin/cluster"} class="btn btn-ghost btn-sm">
+              <.icon name="hero-server-stack" class="size-4" />
             </.link>
             <.link navigate={~p"/admin/settings"} class="btn btn-ghost btn-sm">
               <.icon name="hero-cog-6-tooth" class="size-4" />

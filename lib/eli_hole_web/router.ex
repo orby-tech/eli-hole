@@ -22,6 +22,11 @@ defmodule EliHoleWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :cluster_auth do
+    plug :accepts, ["json"]
+    plug EliHoleWeb.Plugs.ClusterAuth
+  end
+
   scope "/", EliHoleWeb do
     pipe_through :browser
 
@@ -47,6 +52,16 @@ defmodule EliHoleWeb.Router do
     live "/gravity", GravityLive
     live "/local-dns", LocalDNSLive
     get "/teleporter/export", TeleporterController, :export
+    live "/cluster", ClusterLive
+  end
+
+  scope "/api/cluster", EliHoleWeb do
+    pipe_through :cluster_auth
+
+    post "/register", ClusterController, :register
+    post "/stats", ClusterController, :receive_stats
+    post "/config", ClusterController, :receive_config
+    get "/config", ClusterController, :get_config
   end
 
   if Application.compile_env(:eli_hole, :dev_routes) do

@@ -35,6 +35,18 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Deduplication via `ON CONFLICT DO NOTHING`
 - Per-adlist domain count tracking
 
+### Cluster (Master-Slave)
+- **Push-based replication** — master pushes config to slaves on change
+- **Stats aggregation** — slaves push query stats to master every 30s
+- **Auto-registration** — slaves register with master on startup, get initial config
+- **Debounced sync** — rapid config changes coalesced into single push (3s window)
+- **Health monitoring** — master tracks slave status, marks offline after 120s
+- **Synced data**: adlists, custom blocklist entries, local DNS records, upstreams, cache TTL
+- Slaves run gravity independently with synced adlist URLs
+- Admin UI at `/admin/cluster` — add/remove nodes, view status, trigger manual push
+- API key auth via `X-Cluster-Key` header
+- Roles: `standalone` (default), `master`, `slave` — set via `INSTANCE_ROLE` env var
+
 ### Teleporter (Import/Export)
 - Import Pi-hole teleporter backups (`.tar.gz`)
   - Blacklists (exact + regex), DNS providers, adlists, local DNS (`custom.list`)
@@ -49,6 +61,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - **Blocklist** (`/admin/blocklist`) — search, add/edit/delete entries, toggle enable/disable, pagination
 - **Gravity** (`/admin/gravity`) — adlist management, add/remove URLs, trigger update, view status
 - **Local DNS** (`/admin/local-dns`) — custom domain records (A/AAAA/CNAME), bulk import, search
+- **Cluster** (`/admin/cluster`) — master: add/remove slave nodes, view stats, push config; slave: connection status; standalone: setup instructions
 - **Settings** (`/admin/settings`) — upstream DNS providers (presets: Google/Cloudflare/Quad9 + custom), cache TTL, flush cache, upstream speed table, teleporter import/export
 
 ### Auth
@@ -98,6 +111,11 @@ dig @127.0.0.1 -p 5354 google.com
 | `ADMIN_PASSWORD` | (none) | Admin password (min 8 characters) |
 | `FORCE_SSL` | `false` | Set `true` behind TLS-terminating reverse proxy |
 | `SENTRY_DSN` | (none) | GlitchTip/Sentry DSN for error tracking |
+| `INSTANCE_ROLE` | `standalone` | Cluster role: `master`, `slave`, or `standalone` |
+| `CLUSTER_API_KEY` | (none) | Shared secret for cluster API auth |
+| `CLUSTER_MASTER_URL` | (none) | Master URL (slave only), e.g. `http://master:4000` |
+| `INSTANCE_NAME` | auto | Node name for cluster identification |
+| `INSTANCE_URL` | (none) | This instance's URL reachable by master (slave only) |
 
 ## Architecture
 
@@ -138,6 +156,9 @@ Client DNS query (UDP)
 | `EliHole.DNS.LocalDNS` | Custom local domain records (ETS GenServer) |
 | `EliHole.DNS.Teleporter` | Pi-hole/EliHole backup import/export |
 | `EliHole.DNS.Providers` | Upstream DNS provider CRUD |
+| `EliHole.DNS.Cluster` | Cluster context: config export/import, node CRUD, push logic |
+| `EliHole.DNS.ClusterManager` | Master GenServer: PubSub → debounced push to slaves, stats ETS |
+| `EliHole.DNS.ClusterSync` | Slave GenServer: register with master, push stats periodically |
 | `EliHole.Accounts` | Admin user management |
 
 ## Docker
@@ -162,6 +183,27 @@ Migrations run automatically on startup. Ports are configured via `.env`:
 Postgres binds to `127.0.0.1:5432` only (not exposed externally).
 
 Default admin credentials: `admin` / `administrator` — change via env vars for production.
+
+### Cluster Demo (Master + 2 Slaves)
+
+```bash
+docker compose -f docker-compose.demo.yml up --build
+```
+
+Opens 3 instances on a bridge network:
+
+| Instance | Web UI | DNS |
+|---|---|---|
+| Master | http://localhost:4410 | `dig @127.0.0.1 -p 5354 google.com` |
+| Slave 1 | http://localhost:4411 | `dig @127.0.0.1 -p 5355 google.com` |
+| Slave 2 | http://localhost:4412 | `dig @127.0.0.1 -p 5356 google.com` |
+
+Login: `admin` / `administrator`. Open `/admin/cluster` on each instance to see cluster status.
+
+**Demo flow:**
+1. Add an adlist or blocklist entry on master
+2. Config auto-pushes to both slaves (~3s debounce)
+3. Query DNS on slaves → stats appear on master's Cluster page
 
 ### Redirect port 53 to EliHole
 

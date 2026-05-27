@@ -20,9 +20,16 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole/dns/local_record.ex` — LocalRecord Ecto schema (A/AAAA/CNAME)
 - `lib/eli_hole/dns/local_dns.ex` — Local DNS GenServer: ETS cache + CRUD + bulk import
 - `lib/eli_hole/dns/teleporter.ex` — Pi-hole teleporter import/export
+- `lib/eli_hole/dns/cluster.ex` — Cluster context: config export/import, node CRUD, push logic
+- `lib/eli_hole/dns/cluster_node.ex` — ClusterNode Ecto schema
+- `lib/eli_hole/dns/cluster_manager.ex` — Master GenServer: PubSub → debounced push to slaves
+- `lib/eli_hole/dns/cluster_sync.ex` — Slave GenServer: register + push stats to master
 - `lib/eli_hole_web/live/query_log_live.ex` — real-time admin panel at `/admin/queries`
 - `lib/eli_hole_web/live/gravity_live.ex` — gravity/adlist management at `/admin/gravity`
 - `lib/eli_hole_web/live/local_dns_live.ex` — local DNS record management at `/admin/local-dns`
+- `lib/eli_hole_web/live/cluster_live.ex` — cluster management at `/admin/cluster`
+- `lib/eli_hole_web/controllers/cluster_controller.ex` — cluster API endpoints (register, stats, config)
+- `lib/eli_hole_web/plugs/cluster_auth.ex` — API key auth for cluster endpoints
 
 ## Project guidelines
 

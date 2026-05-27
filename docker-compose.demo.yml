@@ -1,0 +1,128 @@
+##
+## EliHole Cluster Demo
+##
+## Starts 1 master + 2 slaves with shared Postgres.
+##
+##   docker compose -f docker-compose.demo.yml up --build
+##
+## Web UI:
+##   Master:  http://localhost:4410/admin/cluster
+##   Slave 1: http://localhost:4411/admin/cluster
+##   Slave 2: http://localhost:4412/admin/cluster
+##
+## DNS (test with dig):
+##   dig @127.0.0.1 -p 5354 google.com   # master
+##   dig @127.0.0.1 -p 5355 google.com   # slave-1
+##   dig @127.0.0.1 -p 5356 google.com   # slave-2
+##
+## Demo flow:
+##   1. Open master UI → add adlist or blocklist entry
+##   2. Watch it auto-propagate to both slaves (push-based, ~3s debounce)
+##   3. Query DNS on slaves → stats appear on master's Cluster page
+##
+
+x-app-common: &app-common
+  build:
+    context: .
+    network: host
+  restart: unless-stopped
+  environment: &app-env
+    SECRET_KEY_BASE: "q+MelerUHHG5oHgE8hwxicZC98ytMUmQa9qW2Eb8i99izKLvo6sf4GXmYJFfuFE9"
+    DNS_UPSTREAMS: "8.8.8.8:53,8.8.4.4:53"
+    ADMIN_USERNAME: admin
+    ADMIN_PASSWORD: administrator
+    CLUSTER_API_KEY: demo-cluster-secret-key
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eli_hole
+      POSTGRES_PASSWORD: eli_hole
+      POSTGRES_DB: eli_hole
+    volumes:
+      - demo-pgdata:/var/lib/postgresql/data
+      - ./docker/demo-init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eli_hole"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    networks:
+      - cluster
+
+  master:
+    <<: *app-common
+    container_name: elihole-master
+    environment:
+      <<: *app-env
+      DATABASE_URL: ecto://eli_hole:eli_hole@db/eli_hole_master
+      INSTANCE_ROLE: master
+      INSTANCE_NAME: master
+      PHX_HOST: localhost
+      PHX_PORT: "4410"
+      DNS_PORT: "5354"
+    ports:
+      - "4410:4410"
+      - "5354:5354/udp"
+    networks:
+      - cluster
+
+  slave-1:
+    <<: *app-common
+    container_name: elihole-slave-1
+    environment:
+      <<: *app-env
+      DATABASE_URL: ecto://eli_hole:eli_hole@db/eli_hole_slave1
+      INSTANCE_ROLE: slave
+      INSTANCE_NAME: slave-1
+      INSTANCE_URL: http://slave-1:4411
+      CLUSTER_MASTER_URL: http://master:4410
+      PHX_HOST: localhost
+      PHX_PORT: "4411"
+      DNS_PORT: "5355"
+    ports:
+      - "4411:4411"
+      - "5355:5355/udp"
+    depends_on:
+      db:
+        condition: service_healthy
+      master:
+        condition: service_started
+    networks:
+      - cluster
+
+  slave-2:
+    <<: *app-common
+    container_name: elihole-slave-2
+    environment:
+      <<: *app-env
+      DATABASE_URL: ecto://eli_hole:eli_hole@db/eli_hole_slave2
+      INSTANCE_ROLE: slave
+      INSTANCE_NAME: slave-2
+      INSTANCE_URL: http://slave-2:4412
+      CLUSTER_MASTER_URL: http://master:4410
+      PHX_HOST: localhost
+      PHX_PORT: "4412"
+      DNS_PORT: "5356"
+    ports:
+      - "4412:4412"
+      - "5356:5356/udp"
+    depends_on:
+      db:
+        condition: service_healthy
+      master:
+        condition: service_started
+    networks:
+      - cluster
+
+volumes:
+  demo-pgdata:
+
+networks:
+  cluster:
+    driver: bridge
