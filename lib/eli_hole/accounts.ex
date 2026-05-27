@@ -3,7 +3,16 @@ defmodule EliHole.Accounts do
   alias EliHole.Accounts.AdminUser
 
   def setup_complete? do
-    Repo.exists?(AdminUser)
+    env_admin_configured?() or Repo.exists?(AdminUser)
+  end
+
+  def ensure_env_admin do
+    with username when is_binary(username) <- Application.get_env(:eli_hole, :admin_username),
+         password when is_binary(password) <- Application.get_env(:eli_hole, :admin_password) do
+      unless Repo.get_by(AdminUser, username: username) do
+        create_admin(%{"username" => username, "password" => password})
+      end
+    end
   end
 
   def create_admin(attrs) do
@@ -25,5 +34,10 @@ defmodule EliHole.Accounts do
           {:error, :invalid_credentials}
         end
     end
+  end
+
+  defp env_admin_configured? do
+    is_binary(Application.get_env(:eli_hole, :admin_username)) and
+      is_binary(Application.get_env(:eli_hole, :admin_password))
   end
 end

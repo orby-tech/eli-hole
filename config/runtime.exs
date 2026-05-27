@@ -24,7 +24,9 @@ config :eli_hole, EliHoleWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PHX_PORT") || System.get_env("PORT") || "4000")]
 
 config :eli_hole,
-  dns_port: String.to_integer(System.get_env("DNS_PORT") || "5354")
+  dns_port: String.to_integer(System.get_env("DNS_PORT") || "5354"),
+  admin_username: System.get_env("ADMIN_USERNAME"),
+  admin_password: System.get_env("ADMIN_PASSWORD")
 
 if dns_upstreams = System.get_env("DNS_UPSTREAMS") do
   upstreams =
