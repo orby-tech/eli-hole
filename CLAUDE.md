@@ -16,8 +16,9 @@ EliHole — DNS sinkhole on Elixir/Phoenix (Pi-hole analog). UDP DNS server + Li
 
 ## Dev
 
-- `mix phx.server` — start with hot reload
-- `mix precommit` — run before committing
+- `make server` — start with hot reload (loads `.env`)
+- `make precommit` — **always** run after finishing changes, fix all issues before reporting done
+- **Never** run `mix` commands directly — use `make` targets (they load `.env` with DB credentials)
 - DNS default port: 5354 (avoid 5353 = mDNS)
 - Test: `dig @127.0.0.1 -p 5354 google.com`
 
