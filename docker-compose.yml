@@ -30,6 +30,7 @@ services:
       DATABASE_URL: ecto://eli_hole:eli_hole@db/eli_hole
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?Generate with mix phx.gen.secret}"
       PHX_HOST: ${PHX_HOST:-localhost}
+      PHX_PORT: "4000"
       DNS_PORT: "5354"
       DNS_UPSTREAMS: ${DNS_UPSTREAMS:-8.8.8.8:53,8.8.4.4:53}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
