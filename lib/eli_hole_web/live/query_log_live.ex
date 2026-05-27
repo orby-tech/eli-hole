@@ -162,13 +162,18 @@ defmodule EliHoleWeb.QueryLogLive do
       <div class="space-y-6">
         <div class="flex items-center justify-between">
           <h1 class="text-2xl font-bold">DNS Query Log</h1>
-          <button
-            phx-click="clear"
-            data-confirm="Clear all query history?"
-            class="btn btn-error btn-sm"
-          >
-            Clear
-          </button>
+          <div class="flex gap-2">
+            <button
+              phx-click="clear"
+              data-confirm="Clear all query history?"
+              class="btn btn-error btn-sm"
+            >
+              Clear
+            </button>
+            <.link href={~p"/logout"} method="delete" class="btn btn-ghost btn-sm">
+              Logout
+            </.link>
+          </div>
         </div>
 
         <div class="grid grid-cols-3 gap-4">

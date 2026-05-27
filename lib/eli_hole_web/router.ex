@@ -10,6 +10,14 @@ defmodule EliHoleWeb.Router do
     plug :put_secure_browser_headers
   end
 
+  pipeline :require_auth do
+    plug EliHoleWeb.Plugs.RequireAuth
+  end
+
+  pipeline :redirect_if_authed do
+    plug EliHoleWeb.Plugs.RedirectIfAuthed
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
   end
@@ -18,21 +26,30 @@ defmodule EliHoleWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
-    live "/admin/queries", QueryLogLive
+
+    live "/setup", SetupLive
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", EliHoleWeb do
-  #   pipe_through :api
-  # end
+  scope "/", EliHoleWeb do
+    pipe_through [:browser, :redirect_if_authed]
 
-  # Enable LiveDashboard and Swoosh mailbox preview in development
+    live "/login", LoginLive
+    post "/login", SessionController, :create
+  end
+
+  scope "/", EliHoleWeb do
+    pipe_through :browser
+
+    delete "/logout", SessionController, :delete
+  end
+
+  scope "/admin", EliHoleWeb do
+    pipe_through [:browser, :require_auth]
+
+    live "/queries", QueryLogLive
+  end
+
   if Application.compile_env(:eli_hole, :dev_routes) do
-    # If you want to use the LiveDashboard in production, you should put
-    # it behind authentication and allow only admins to access it.
-    # If your application does not have an admins-only section yet,
-    # you can use Plug.BasicAuth to set up some basic authentication
-    # as long as you are also using SSL (which you should anyway).
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do

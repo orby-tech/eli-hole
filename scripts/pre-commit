@@ -2,6 +2,7 @@
 set -e
 
 export PATH="$HOME/.asdf/installs/erlang/27.3.4/bin:$HOME/.asdf/bin:$HOME/.asdf/shims:$PATH"
+export MIX_ENV=test
 [ -f .env ] && set -a && source .env && set +a
 
 RED='\033[0;31m'
