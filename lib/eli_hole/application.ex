@@ -16,6 +16,7 @@ defmodule EliHole.Application do
       {Phoenix.PubSub, name: EliHole.PubSub},
       EliHole.DNS.Cache,
       EliHole.DNS.Blocklist,
+      EliHole.DNS.LocalDNS,
       EliHole.DNS.SpeedTracker,
       EliHole.DNS.Gravity,
       EliHole.DNS.QueryLog,

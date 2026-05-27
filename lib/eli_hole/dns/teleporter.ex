@@ -2,7 +2,7 @@ defmodule EliHole.DNS.Teleporter do
   import Ecto.Query
 
   alias EliHole.Repo
-  alias EliHole.DNS.{Adlists, BlocklistEntry, Provider, Providers}
+  alias EliHole.DNS.{Adlists, BlocklistEntry, LocalDNS, LocalRecord, Provider, Providers}
 
   require Logger
 
@@ -36,11 +36,19 @@ defmodule EliHole.DNS.Teleporter do
       |> Enum.map(&provider_to_map/1)
       |> Jason.encode!()
 
+    local_dns =
+      LocalRecord
+      |> order_by(:domain)
+      |> Repo.all()
+      |> Enum.map(&local_record_to_map/1)
+      |> Jason.encode!()
+
     files = [
       {"blocklist_exact.json", blocklist_exact},
       {"blocklist_wildcard.json", blocklist_wildcard},
       {"blocklist_regex.json", blocklist_regex},
-      {"providers.json", providers}
+      {"providers.json", providers},
+      {"local_dns.json", local_dns}
     ]
 
     tar_files =
@@ -60,11 +68,12 @@ defmodule EliHole.DNS.Teleporter do
   """
   def import_pihole(tar_binary) when is_binary(tar_binary) do
     with {:ok, files} <- extract_tar(tar_binary) do
-      summary = %{blocklist: 0, providers: 0, gravity: 0, skipped: []}
+      summary = %{blocklist: 0, providers: 0, gravity: 0, local_dns: 0, skipped: []}
 
       summary = import_pihole_blacklist(files, summary)
       summary = import_pihole_providers(files, summary)
       summary = import_pihole_gravity(files, summary)
+      summary = import_pihole_local_dns(files, summary)
       summary = note_skipped(files, summary)
 
       {:ok, summary}
@@ -77,12 +86,13 @@ defmodule EliHole.DNS.Teleporter do
   """
   def import_elihole(tar_binary) when is_binary(tar_binary) do
     with {:ok, files} <- extract_tar(tar_binary) do
-      summary = %{blocklist: 0, providers: 0}
+      summary = %{blocklist: 0, providers: 0, local_dns: 0}
 
       summary = import_elihole_blocklist(files, "blocklist_exact.json", "exact", summary)
       summary = import_elihole_blocklist(files, "blocklist_wildcard.json", "wildcard", summary)
       summary = import_elihole_blocklist(files, "blocklist_regex.json", "regex", summary)
       summary = import_elihole_providers(files, summary)
+      summary = import_elihole_local_dns(files, summary)
 
       {:ok, summary}
     end
@@ -95,9 +105,15 @@ defmodule EliHole.DNS.Teleporter do
         names = Map.keys(files)
 
         cond do
-          "blacklist.exact.json" in names or "setupVars.conf" in names -> :pihole
-          "blocklist_exact.json" in names or "providers.json" in names -> :elihole
-          true -> :unknown
+          "blacklist.exact.json" in names or "setupVars.conf" in names ->
+            :pihole
+
+          "blocklist_exact.json" in names or "providers.json" in names or
+              "local_dns.json" in names ->
+            :elihole
+
+          true ->
+            :unknown
         end
 
       {:error, _} ->
@@ -242,7 +258,6 @@ defmodule EliHole.DNS.Teleporter do
       []
       |> maybe_skip(files, "whitelist.exact.json", "whitelist (exact)")
       |> maybe_skip(files, "whitelist.regex.json", "whitelist (regex)")
-      |> maybe_skip(files, "custom.list", "local DNS records")
       |> maybe_skip(files, "client.json", "clients")
       |> maybe_skip(files, "group.json", "groups")
 
@@ -325,6 +340,51 @@ defmodule EliHole.DNS.Teleporter do
     end
   end
 
+  defp import_pihole_local_dns(files, summary) do
+    case Map.get(files, "custom.list") do
+      nil ->
+        summary
+
+      content ->
+        {:ok, count} = LocalDNS.import_custom_list(content)
+        Map.put(summary, :local_dns, count)
+    end
+  end
+
+  defp import_elihole_local_dns(files, summary) do
+    case Map.get(files, "local_dns.json") do
+      nil ->
+        summary
+
+      content ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        entries =
+          content
+          |> Jason.decode!()
+          |> Enum.map(fn item ->
+            %{
+              domain: item["domain"],
+              record_type: item["record_type"],
+              target: item["target"],
+              enabled: item["enabled"],
+              comment: item["comment"],
+              inserted_at: now,
+              updated_at: now
+            }
+          end)
+
+        {count, _} =
+          Repo.insert_all(LocalRecord, entries,
+            on_conflict: :nothing,
+            conflict_target: [:domain, :record_type]
+          )
+
+        LocalDNS.flush_cache()
+        %{summary | local_dns: count}
+    end
+  end
+
   defp entry_to_map(%BlocklistEntry{} = e) do
     %{
       domain: e.domain,
@@ -342,6 +402,16 @@ defmodule EliHole.DNS.Teleporter do
       port: p.port,
       enabled: p.enabled,
       position: p.position
+    }
+  end
+
+  defp local_record_to_map(%LocalRecord{} = r) do
+    %{
+      domain: r.domain,
+      record_type: r.record_type,
+      target: r.target,
+      enabled: r.enabled,
+      comment: r.comment
     }
   end
 end

@@ -12,6 +12,13 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Blocked domains return `0.0.0.0` for A records, NXDOMAIN for others
 - Upstream speed tracking with weighted random selection
 
+### Local DNS
+- Custom domain-to-IP mappings (A, AAAA, CNAME records)
+- ETS-backed lookup — resolved before upstream forwarding
+- Admin UI at `/admin/local-dns` with CRUD, search, pagination
+- Bulk import from Pi-hole `custom.list` / `/etc/hosts` format
+- Included in teleporter export/import
+
 ### Blocking
 - **Exact match** — `ads.example.com`
 - **Wildcard match** — `*.example.com` blocks all subdomains
@@ -30,10 +37,10 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 
 ### Teleporter (Import/Export)
 - Import Pi-hole teleporter backups (`.tar.gz`)
-  - Blacklists (exact + regex), DNS providers, adlists
-  - Reports skipped items (whitelists, clients, groups, local DNS)
-- Import EliHole's own backups
-- Export current config as `.tar.gz` (blocklist entries + providers)
+  - Blacklists (exact + regex), DNS providers, adlists, local DNS (`custom.list`)
+  - Reports skipped items (whitelists, clients, groups)
+- Import EliHole's own backups (blocklist + providers + local DNS)
+- Export current config as `.tar.gz` (blocklist entries + providers + local DNS)
 - Auto-detect backup format (Pi-hole vs EliHole)
 
 ### Admin Panel (LiveView)
@@ -41,10 +48,11 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - **Query Log** (`/admin/queries`) — real-time query stream via PubSub, per-query status/timing/upstream
 - **Blocklist** (`/admin/blocklist`) — search, add/edit/delete entries, toggle enable/disable, pagination
 - **Gravity** (`/admin/gravity`) — adlist management, add/remove URLs, trigger update, view status
+- **Local DNS** (`/admin/local-dns`) — custom domain records (A/AAAA/CNAME), bulk import, search
 - **Settings** (`/admin/settings`) — upstream DNS providers (presets: Google/Cloudflare/Quad9 + custom), cache TTL, flush cache, upstream speed table, teleporter import/export
 
 ### Auth
-- Admin user via `ADMIN_USER` / `ADMIN_PASSWORD` env vars
+- Admin user via `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars (min 8 chars for password)
 - Session-based login with password hashing (bcrypt)
 - First-run setup page at `/setup`
 - Auth-protected `/admin/*` routes
@@ -83,10 +91,12 @@ dig @127.0.0.1 -p 5354 google.com
 | `DNS_UPSTREAMS` | `8.8.8.8:53,8.8.4.4:53` | Comma-separated upstream DNS servers |
 | `PHX_PORT` / `PORT` | `4410` | Web UI port |
 | `PHX_HOST` | `localhost` | Hostname for URL generation |
+| `PHX_SCHEME` | `http` | URL scheme (`http` or `https` behind reverse proxy) |
 | `DATABASE_URL` | (dev default) | PostgreSQL connection string |
 | `SECRET_KEY_BASE` | (required) | Phoenix secret key |
 | `ADMIN_USERNAME` | (none) | Admin username (created on startup) |
-| `ADMIN_PASSWORD` | (none) | Admin password |
+| `ADMIN_PASSWORD` | (none) | Admin password (min 8 characters) |
+| `FORCE_SSL` | `false` | Set `true` behind TLS-terminating reverse proxy |
 | `SENTRY_DSN` | (none) | GlitchTip/Sentry DSN for error tracking |
 
 ## Architecture
@@ -99,6 +109,9 @@ Client DNS query (UDP)
   DNS.Blocklist (ETS: exact + wildcard + regex)
         |  blocked? --> return 0.0.0.0 / NXDOMAIN
         |  allowed? v
+  DNS.LocalDNS (ETS: custom A/AAAA/CNAME records)
+        |  local match? --> return custom response
+        |  no match? v
   DNS.Cache (ETS, configurable TTL)
         |  hit? --> return cached response
         |  miss? v
@@ -122,32 +135,56 @@ Client DNS query (UDP)
 | `EliHole.DNS.SpeedTracker` | Upstream latency tracking + weighted selection |
 | `EliHole.DNS.Gravity` | Scheduled adlist download and sync |
 | `EliHole.DNS.QueryLog` | ETS query history + PubSub broadcast |
+| `EliHole.DNS.LocalDNS` | Custom local domain records (ETS GenServer) |
 | `EliHole.DNS.Teleporter` | Pi-hole/EliHole backup import/export |
 | `EliHole.DNS.Providers` | Upstream DNS provider CRUD |
 | `EliHole.Accounts` | Admin user management |
 
 ## Docker
 
+App runs with `network_mode: host` for low-latency UDP — binds directly to host ports.
+
 ```bash
-# Generate secret key (no local Elixir needed)
-export SECRET_KEY_BASE=$(openssl rand -base64 48)
+cp .env.example .env
+# edit .env: set SECRET_KEY_BASE, ADMIN_USERNAME, ADMIN_PASSWORD
 
 # Start app + Postgres
 docker compose up -d
-
-# Run migrations (required on first start)
-docker compose exec app bin/eli_hole eval "EliHole.Release.migrate()"
 ```
 
-Ports: `4000` (web), `53/udp` (DNS, mapped from container's 5354).
+Migrations run automatically on startup. Ports are configured via `.env`:
 
-Override admin credentials (default `admin`/`admin` — change for production):
+| Variable | Default | Description |
+|---|---|---|
+| `PHX_PORT` | `4410` | Web UI port on host |
+| `DNS_PORT` | `5354` | DNS UDP port on host |
+
+Postgres binds to `127.0.0.1:5432` only (not exposed externally).
+
+Default admin credentials: `admin` / `administrator` — change via env vars for production.
+
+### Redirect port 53 to EliHole
+
+Standard DNS uses port 53. To redirect external DNS traffic to EliHole without running as root:
 
 ```bash
-ADMIN_USERNAME=myadmin ADMIN_PASSWORD=secret docker compose up -d
+# Redirect incoming port 53 to EliHole (exclude Docker subnet)
+sudo iptables -t nat -A PREROUTING -p udp --dport 53 ! -s 172.16.0.0/12 -j REDIRECT --to-port 5354
+
+# Make persistent
+sudo apt install iptables-persistent -y
+sudo netfilter-persistent save
 ```
 
-> **Note:** The default prod config assumes HTTPS via reverse proxy. For local Docker testing without TLS, LiveView websockets may fail. Use a reverse proxy (Caddy/nginx/Traefik) or adjust `PHX_HOST` accordingly.
+Then set your router's DHCP DNS to the host IP.
+
+### Set as system DNS (Linux)
+
+```bash
+sudo mkdir -p /etc/systemd/resolved.conf.d
+echo -e "[Resolve]\nDNS=192.168.12.135\nDNSOverTLS=no" | sudo tee /etc/systemd/resolved.conf.d/elihole.conf
+sudo systemctl restart systemd-resolved
+```
 
 ## Production (bare metal)
 
@@ -177,7 +214,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 - [ ] **Long-term statistics** — daily/weekly/monthly aggregates
 
 ### Operations
-- [x] **Dockerfile** — multi-stage build with docker-compose (app + Postgres)
 - [ ] **Health check endpoint** — `GET /api/health`
 - [ ] **Prometheus metrics** — export via `/metrics`
 - [ ] **Systemd unit** — production service file

@@ -45,6 +45,7 @@ defmodule EliHoleWeb.Router do
     live "/blocklist", BlocklistLive
     live "/settings", SettingsLive
     live "/gravity", GravityLive
+    live "/local-dns", LocalDNSLive
     get "/teleporter/export", TeleporterController, :export
   end
 

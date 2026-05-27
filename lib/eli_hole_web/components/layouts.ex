@@ -72,6 +72,12 @@ defmodule EliHoleWeb.Layouts do
             active={@active_nav == :gravity}
           />
           <.nav_item
+            href={~p"/admin/local-dns"}
+            icon="hero-map-pin"
+            label="Local DNS"
+            active={@active_nav == :local_dns}
+          />
+          <.nav_item
             href={~p"/admin/settings"}
             icon="hero-cog-6-tooth"
             label="Settings"
@@ -109,6 +115,9 @@ defmodule EliHoleWeb.Layouts do
             </.link>
             <.link navigate={~p"/admin/gravity"} class="btn btn-ghost btn-sm">
               <.icon name="hero-cloud-arrow-down" class="size-4" />
+            </.link>
+            <.link navigate={~p"/admin/local-dns"} class="btn btn-ghost btn-sm">
+              <.icon name="hero-map-pin" class="size-4" />
             </.link>
             <.link navigate={~p"/admin/settings"} class="btn btn-ghost btn-sm">
               <.icon name="hero-cog-6-tooth" class="size-4" />

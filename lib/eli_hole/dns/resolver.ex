@@ -1,5 +1,5 @@
 defmodule EliHole.DNS.Resolver do
-  alias EliHole.DNS.{Blocklist, Cache, SpeedTracker}
+  alias EliHole.DNS.{Blocklist, Cache, LocalDNS, SpeedTracker}
 
   require Logger
 
@@ -13,14 +13,31 @@ defmodule EliHole.DNS.Resolver do
       Logger.debug("Blocked: #{domain}/#{type}")
       {:blocked, nil, build_blocked_response(query_packet, type)}
     else
-      case Cache.lookup(domain, type) do
-        {:hit, cached_response, original_upstream} ->
-          Logger.debug("Cache hit: #{domain}/#{type}")
-          {:ok, "cache (#{original_upstream})", rewrite_id(query_packet, cached_response)}
+      case check_local_dns(query_packet, domain, type) do
+        {:ok, _, _} = result ->
+          result
 
-        :miss ->
-          resolve_upstream(query_packet, domain, type)
+        nil ->
+          case Cache.lookup(domain, type) do
+            {:hit, cached_response, original_upstream} ->
+              Logger.debug("Cache hit: #{domain}/#{type}")
+              {:ok, "cache (#{original_upstream})", rewrite_id(query_packet, cached_response)}
+
+            :miss ->
+              resolve_upstream(query_packet, domain, type)
+          end
       end
+    end
+  end
+
+  defp check_local_dns(query_packet, domain, type) do
+    case LocalDNS.lookup(domain, type) do
+      {:ok, target} ->
+        Logger.debug("Local DNS: #{domain}/#{type} -> #{target}")
+        {:ok, "local", build_local_response(query_packet, type, target)}
+
+      :miss ->
+        nil
     end
   end
 
@@ -192,6 +209,59 @@ defmodule EliHole.DNS.Resolver do
             {:ok, response} -> response
             response when is_binary(response) -> response
           end
+        end
+
+      {:error, _} ->
+        <<>>
+    end
+  rescue
+    _ -> <<>>
+  end
+
+  defp build_local_response(query_packet, query_type, target) do
+    case :inet_dns.decode(query_packet) do
+      {:ok, record} ->
+        header = :inet_dns.msg(record, :header)
+        id = :inet_dns.header(header, :id)
+        qdlist = :inet_dns.msg(record, :qdlist)
+        q = List.first(qdlist)
+        domain = :inet_dns.dns_query(q, :domain)
+
+        response_header =
+          :inet_dns.make_header(id: id, qr: true, opcode: :query, aa: true, rcode: 0, ra: true)
+
+        answer =
+          case query_type do
+            "A" ->
+              {:ok, ip} = :inet.parse_ipv4_address(String.to_charlist(target))
+              :inet_dns.make_rr(domain: domain, type: :a, class: :in, ttl: 300, data: ip)
+
+            "AAAA" ->
+              {:ok, ip} = :inet.parse_ipv6_address(String.to_charlist(target))
+              :inet_dns.make_rr(domain: domain, type: :aaaa, class: :in, ttl: 300, data: ip)
+
+            "CNAME" ->
+              :inet_dns.make_rr(
+                domain: domain,
+                type: :cname,
+                class: :in,
+                ttl: 300,
+                data: String.to_charlist(target)
+              )
+
+            _ ->
+              nil
+          end
+
+        if answer do
+          msg = :inet_dns.make_msg(header: response_header, qdlist: qdlist, anlist: [answer])
+
+          case :inet_dns.encode(msg) do
+            {:ok, response} -> response
+            response when is_binary(response) -> response
+          end
+        else
+          <<>>
         end
 
       {:error, _} ->
