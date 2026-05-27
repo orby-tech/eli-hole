@@ -47,15 +47,39 @@ defmodule EliHoleWeb.Layouts do
         </div>
 
         <nav class="flex-1 p-3 space-y-1">
-          <.nav_item href={~p"/admin"} icon="hero-chart-bar" label="Dashboard" active={@active_nav == :dashboard} />
-          <.nav_item href={~p"/admin/queries"} icon="hero-list-bullet" label="Query Log" active={@active_nav == :queries} />
-          <.nav_item href={~p"/admin/blocklist"} icon="hero-shield-exclamation" label="Blocklist" active={@active_nav == :blocklist} />
-          <.nav_item href={~p"/admin/settings"} icon="hero-cog-6-tooth" label="Settings" active={@active_nav == :settings} />
+          <.nav_item
+            href={~p"/admin"}
+            icon="hero-chart-bar"
+            label="Dashboard"
+            active={@active_nav == :dashboard}
+          />
+          <.nav_item
+            href={~p"/admin/queries"}
+            icon="hero-list-bullet"
+            label="Query Log"
+            active={@active_nav == :queries}
+          />
+          <.nav_item
+            href={~p"/admin/blocklist"}
+            icon="hero-shield-exclamation"
+            label="Blocklist"
+            active={@active_nav == :blocklist}
+          />
+          <.nav_item
+            href={~p"/admin/settings"}
+            icon="hero-cog-6-tooth"
+            label="Settings"
+            active={@active_nav == :settings}
+          />
         </nav>
 
         <div class="p-3 border-t border-base-300 space-y-3">
           <.theme_toggle />
-          <.link href={~p"/logout"} method="delete" class="flex items-center gap-2 text-sm opacity-60 hover:opacity-100 transition-opacity px-2">
+          <.link
+            href={~p"/logout"}
+            method="delete"
+            class="flex items-center gap-2 text-sm opacity-60 hover:opacity-100 transition-opacity px-2"
+          >
             <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" /> Logout
           </.link>
         </div>
@@ -106,7 +130,10 @@ defmodule EliHoleWeb.Layouts do
       navigate={@href}
       class={[
         "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-        if(@active, do: "bg-primary text-primary-content", else: "hover:bg-base-300 opacity-70 hover:opacity-100")
+        if(@active,
+          do: "bg-primary text-primary-content",
+          else: "hover:bg-base-300 opacity-70 hover:opacity-100"
+        )
       ]}
     >
       <.icon name={@icon} class="size-5" />
