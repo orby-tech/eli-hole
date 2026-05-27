@@ -1,7 +1,7 @@
 defmodule EliHoleWeb.QueryLogLive do
   use EliHoleWeb, :live_view
 
-  alias EliHole.DNS.{Cache, QueryLog}
+  alias EliHole.DNS.{Cache, Providers, QueryLog, SpeedTracker}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -15,6 +15,7 @@ defmodule EliHoleWeb.QueryLogLive do
     cache_stats = Cache.stats()
 
     upstreams = Cache.get_upstreams()
+    providers = Providers.list_all()
     active_presets = detect_active_presets(upstreams)
 
     {:ok,
@@ -24,8 +25,10 @@ defmodule EliHoleWeb.QueryLogLive do
      |> assign(:ttl_input, to_string(cache_stats.ttl))
      |> assign(:upstreams, upstreams)
      |> assign(:active_presets, active_presets)
+     |> assign(:providers, providers)
      |> assign(:custom_upstream_input, "")
      |> assign(:presets, Cache.presets())
+     |> assign(:speed_stats, SpeedTracker.stats())
      |> stream(:queries, queries)}
   end
 
@@ -38,6 +41,7 @@ defmodule EliHoleWeb.QueryLogLive do
      socket
      |> assign(:stats, stats)
      |> assign(:cache_stats, cache_stats)
+     |> assign(:speed_stats, SpeedTracker.stats())
      |> stream_insert(:queries, entry, at: 0)}
   end
 
@@ -92,67 +96,52 @@ defmodule EliHoleWeb.QueryLogLive do
 
   @impl true
   def handle_event("toggle_preset", %{"preset" => preset}, socket) do
-    presets = Cache.presets()
-    preset_servers = Map.get(presets, preset, [])
-    active = socket.assigns.active_presets
-
-    {new_upstreams, new_active} =
-      if MapSet.member?(active, preset) do
-        {socket.assigns.upstreams -- preset_servers, MapSet.delete(active, preset)}
-      else
-        {Enum.uniq(socket.assigns.upstreams ++ preset_servers), MapSet.put(active, preset)}
-      end
-
-    new_upstreams = if new_upstreams == [], do: preset_servers, else: new_upstreams
-    new_active = if new_upstreams == preset_servers, do: MapSet.new([preset]), else: new_active
-
-    Cache.set_upstreams(new_upstreams)
-    Cache.flush()
-
-    {:noreply,
-     socket
-     |> assign(:upstreams, new_upstreams)
-     |> assign(:active_presets, new_active)
-     |> assign(:cache_stats, Cache.stats())}
+    Providers.toggle_preset(preset)
+    reload_providers(socket)
   end
 
   @impl true
   def handle_event("add_upstream", %{"upstream" => upstream_str}, socket) do
     case Cache.parse_upstream(upstream_str) do
-      {:ok, upstream} ->
-        new_upstreams = socket.assigns.upstreams ++ [upstream]
-        Cache.set_upstreams(new_upstreams)
-        Cache.flush()
-
-        {:noreply,
-         socket
-         |> assign(:upstreams, new_upstreams)
-         |> assign(:active_presets, detect_active_presets(new_upstreams))
-         |> assign(:custom_upstream_input, "")
-         |> assign(:cache_stats, Cache.stats())}
+      {:ok, {ip, port}} ->
+        case Providers.create(%{"ip" => to_string(:inet.ntoa(ip)), "port" => port}) do
+          {:ok, _} -> reload_providers(socket, custom_upstream_input: "")
+          {:error, _} -> {:noreply, put_flash(socket, :error, "Already exists or invalid")}
+        end
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Invalid upstream format. Use IP:PORT or IP")}
+        {:noreply, put_flash(socket, :error, "Invalid format. Use IP:PORT or IP")}
     end
   end
 
   @impl true
-  def handle_event("remove_upstream", %{"index" => index_str}, socket) do
-    index = String.to_integer(index_str)
-    new_upstreams = List.delete_at(socket.assigns.upstreams, index)
+  def handle_event("remove_upstream", %{"id" => id}, socket) do
+    providers = Providers.list_all()
 
-    if new_upstreams == [] do
+    if length(providers) <= 1 do
       {:noreply, put_flash(socket, :error, "Need at least one upstream")}
     else
-      Cache.set_upstreams(new_upstreams)
-      Cache.flush()
-
-      {:noreply,
-       socket
-       |> assign(:upstreams, new_upstreams)
-       |> assign(:active_presets, detect_active_presets(new_upstreams))
-       |> assign(:cache_stats, Cache.stats())}
+      provider = Providers.get!(id)
+      Providers.delete(provider)
+      reload_providers(socket)
     end
+  end
+
+  defp reload_providers(socket, extra_assigns \\ []) do
+    Cache.load_upstreams_from_db()
+    Cache.flush()
+    providers = Providers.list_all()
+    upstreams = Cache.get_upstreams()
+
+    socket =
+      socket
+      |> assign(:providers, providers)
+      |> assign(:upstreams, upstreams)
+      |> assign(:active_presets, detect_active_presets(upstreams))
+      |> assign(:cache_stats, Cache.stats())
+
+    socket = Enum.reduce(extra_assigns, socket, fn {k, v}, s -> assign(s, k, v) end)
+    {:noreply, socket}
   end
 
   defp detect_active_presets(upstreams) do
@@ -252,14 +241,17 @@ defmodule EliHoleWeb.QueryLogLive do
             </button>
           </div>
           <div class="space-y-1">
-            <div
-              :for={{upstream, idx} <- Enum.with_index(@upstreams)}
-              class="flex items-center gap-2"
-            >
-              <span class="font-mono text-sm">{Cache.format_upstream(upstream)}</span>
+            <div :for={p <- @providers} class="flex items-center gap-2">
+              <span class={[
+                "font-mono text-sm",
+                if(!p.enabled, do: "opacity-40 line-through")
+              ]}>
+                {p.ip}:{p.port}
+              </span>
+              <span :if={p.name} class="text-xs opacity-50">{p.name}</span>
               <button
                 phx-click="remove_upstream"
-                phx-value-index={idx}
+                phx-value-id={p.id}
                 class="btn btn-ghost btn-xs text-error"
               >
                 <.icon name="hero-x-mark" class="size-4" />
@@ -276,6 +268,47 @@ defmodule EliHoleWeb.QueryLogLive do
             />
             <button type="submit" class="btn btn-primary btn-sm">Add</button>
           </form>
+        </div>
+
+        <div :if={@speed_stats != []} class="bg-base-200 rounded-xl p-4 space-y-3">
+          <h2 class="text-lg font-semibold">Upstream Speed</h2>
+          <table class="table table-sm w-full">
+            <thead>
+              <tr class="text-base-content/60">
+                <th>Upstream</th>
+                <th>Avg</th>
+                <th>Min</th>
+                <th>Max</th>
+                <th>Samples</th>
+                <th>Timeouts</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={s <- @speed_stats}>
+                <td class="font-mono text-sm">{Cache.format_upstream(s.upstream)}</td>
+                <td class={[
+                  "font-bold",
+                  cond do
+                    s.avg_ms == nil -> "opacity-40"
+                    s.avg_ms < 50 -> "text-success"
+                    s.avg_ms < 200 -> "text-warning"
+                    true -> "text-error"
+                  end
+                ]}>
+                  {s.avg_ms || "—"}ms
+                </td>
+                <td class="text-xs opacity-60">{s.min_ms || "—"}ms</td>
+                <td class="text-xs opacity-60">{s.max_ms || "—"}ms</td>
+                <td class="text-xs">{s.samples}</td>
+                <td class={[
+                  "text-xs",
+                  if(s.timeouts > 0, do: "text-error font-bold", else: "opacity-40")
+                ]}>
+                  {s.timeouts}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <div class="overflow-x-auto">

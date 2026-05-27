@@ -9,6 +9,11 @@ endef
 
 setup: deps hooks.install db.create db.migrate
 
+dev.validate:
+	dig @127.0.0.1 -p 5354 google.com
+	dig @127.0.0.1 -p 5354 glitchtip.orby-tech.space
+
+
 server:
 	@$(load_env) && mix phx.server
 

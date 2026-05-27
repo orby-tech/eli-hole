@@ -1,9 +1,10 @@
 defmodule EliHole.DNS.Resolver do
-  alias EliHole.DNS.Cache
+  alias EliHole.DNS.{Cache, SpeedTracker}
 
   require Logger
 
   @upstream_timeout 5_000
+  @race_count 2
 
   def resolve(query_packet) when is_binary(query_packet) do
     {domain, type} = extract_query_info(query_packet)
@@ -20,17 +21,112 @@ defmodule EliHole.DNS.Resolver do
 
   defp resolve_upstream(query_packet, domain, type) do
     upstreams = Cache.get_upstreams()
+    racers = SpeedTracker.pick_racers(upstreams, @race_count)
 
-    case forward(query_packet, upstreams) do
-      {:ok, {upstream, response}} ->
-        upstream_str = to_string(:inet.ntoa(upstream))
-        Logger.debug("Resolved via #{upstream_str}")
+    case race(query_packet, racers) do
+      {:ok, {{ip, port} = upstream, response, time_ms}} ->
+        upstream_str = "#{:inet.ntoa(ip)}:#{port}"
+        SpeedTracker.record(upstream, time_ms)
+        Logger.debug("Resolved via #{upstream_str} (#{time_ms}ms, raced #{length(racers)})")
         Cache.put(domain, type, response, upstream_str)
         {:ok, upstream_str, response}
 
-      {:error, reason} ->
-        Logger.error("DNS resolution failed: #{inspect(reason)}")
-        {:error, nil, build_servfail(query_packet)}
+      {:error, _reason} ->
+        case fallback_forward(query_packet, upstreams -- racers) do
+          {:ok, {{ip, port}, response}} ->
+            upstream_str = "#{:inet.ntoa(ip)}:#{port}"
+            Cache.put(domain, type, response, upstream_str)
+            {:ok, upstream_str, response}
+
+          {:error, reason} ->
+            Logger.error("DNS resolution failed: #{inspect(reason)}")
+            {:error, nil, build_servfail(query_packet)}
+        end
+    end
+  end
+
+  defp race(_packet, []), do: {:error, :no_racers}
+
+  defp race(packet, racers) do
+    tasks =
+      Enum.map(racers, fn {ip, port} ->
+        Task.async(fn ->
+          {time_us, result} =
+            :timer.tc(fn ->
+              case :gen_udp.open(0, [:binary, active: false]) do
+                {:ok, socket} ->
+                  try do
+                    :gen_udp.send(socket, ip, port, packet)
+                    :gen_udp.recv(socket, 0, @upstream_timeout)
+                  after
+                    :gen_udp.close(socket)
+                  end
+
+                {:error, reason} ->
+                  {:error, reason}
+              end
+            end)
+
+          case result do
+            {:ok, {_recv_ip, _recv_port, response}} ->
+              {:ok, {ip, port}, response, div(time_us, 1000)}
+
+            {:error, reason} ->
+              SpeedTracker.record_timeout({ip, port})
+              {:error, {ip, port}, reason}
+          end
+        end)
+      end)
+
+    try do
+      await_first(tasks)
+    after
+      Enum.each(tasks, fn task ->
+        Task.shutdown(task, :brutal_kill)
+      end)
+    end
+  end
+
+  defp await_first([]), do: {:error, :all_racers_failed}
+
+  defp await_first(tasks) do
+    receive do
+      {ref, {:ok, {ip, port}, response, time_ms}} ->
+        Process.demonitor(ref, [:flush])
+        {:ok, {{ip, port}, response, time_ms}}
+
+      {ref, {:error, _upstream, _reason}} ->
+        Process.demonitor(ref, [:flush])
+        remaining = Enum.reject(tasks, fn t -> t.ref == ref end)
+        await_first(remaining)
+
+      {:DOWN, ref, :process, _pid, _reason} ->
+        remaining = Enum.reject(tasks, fn t -> t.ref == ref end)
+        await_first(remaining)
+    after
+      @upstream_timeout ->
+        {:error, :all_racers_timeout}
+    end
+  end
+
+  defp fallback_forward(_packet, []), do: {:error, :all_upstreams_failed}
+
+  defp fallback_forward(packet, [{ip, port} | rest]) do
+    case :gen_udp.open(0, [:binary, active: false]) do
+      {:ok, socket} ->
+        try do
+          :gen_udp.send(socket, ip, port, packet)
+
+          case :gen_udp.recv(socket, 0, @upstream_timeout) do
+            {:ok, {_ip, _port, response}} -> {:ok, {{ip, port}, response}}
+            {:error, _} -> fallback_forward(packet, rest)
+          end
+        after
+          :gen_udp.close(socket)
+        end
+
+      {:error, _} ->
+        fallback_forward(packet, rest)
     end
   end
 
@@ -56,33 +152,6 @@ defmodule EliHole.DNS.Resolver do
     <<query_id::16, _::binary>> = query_packet
     <<_::16, rest::binary>> = cached_response
     <<query_id::16, rest::binary>>
-  end
-
-  defp forward(_packet, []) do
-    {:error, :all_upstreams_failed}
-  end
-
-  defp forward(packet, [{ip, port} | rest]) do
-    case :gen_udp.open(0, [:binary, active: false]) do
-      {:ok, socket} ->
-        try do
-          :gen_udp.send(socket, ip, port, packet)
-
-          case :gen_udp.recv(socket, 0, @upstream_timeout) do
-            {:ok, {_ip, _port, response}} ->
-              {:ok, {ip, response}}
-
-            {:error, reason} ->
-              Logger.warning("Upstream #{:inet.ntoa(ip)}:#{port} failed: #{inspect(reason)}")
-              forward(packet, rest)
-          end
-        after
-          :gen_udp.close(socket)
-        end
-
-      {:error, _reason} ->
-        forward(packet, rest)
-    end
   end
 
   defp build_servfail(query_packet) do

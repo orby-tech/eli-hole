@@ -40,7 +40,33 @@ defmodule EliHole.DNS.Cache do
 
   def set_ttl(seconds) when is_integer(seconds) and seconds >= 0 do
     :ets.insert(@settings_table, {:ttl, seconds})
+    save_setting("ttl", to_string(seconds))
     Phoenix.PubSub.broadcast(EliHole.PubSub, "dns:cache_settings", {:ttl_changed, seconds})
+  end
+
+  defp save_setting(key, value) do
+    alias EliHole.DNS.Setting
+
+    case EliHole.Repo.get_by(Setting, key: key) do
+      nil ->
+        %Setting{}
+        |> Setting.changeset(%{key: key, value: value})
+        |> EliHole.Repo.insert()
+
+      existing ->
+        existing
+        |> Setting.changeset(%{value: value})
+        |> EliHole.Repo.update()
+    end
+  end
+
+  defp load_setting(key) do
+    alias EliHole.DNS.Setting
+
+    case EliHole.Repo.get_by(Setting, key: key) do
+      nil -> nil
+      setting -> setting.value
+    end
   end
 
   @presets %{
@@ -54,8 +80,18 @@ defmodule EliHole.DNS.Cache do
 
   def get_upstreams do
     case :ets.lookup(@settings_table, :upstreams) do
-      [{:upstreams, val}] -> val
-      [] -> Application.get_env(:eli_hole, :dns_upstreams, [{{8, 8, 8, 8}, 53}])
+      [{:upstreams, val}] when val != [] -> val
+      _ -> Application.get_env(:eli_hole, :dns_upstreams, [{{8, 8, 8, 8}, 53}])
+    end
+  end
+
+  def load_upstreams_from_db do
+    alias EliHole.DNS.Providers
+    providers = Providers.list_enabled()
+
+    if providers != [] do
+      tuples = Providers.to_tuples(providers)
+      set_upstreams(tuples)
     end
   end
 
@@ -124,7 +160,26 @@ defmodule EliHole.DNS.Cache do
     :ets.new(@settings_table, [:set, :named_table, :public, read_concurrency: true])
     :ets.insert(@settings_table, {:ttl, @default_ttl})
     schedule_cleanup()
+    send(self(), :load_from_db)
     {:ok, %{}}
+  end
+
+  @impl true
+  def handle_info(:load_from_db, state) do
+    load_upstreams_from_db()
+
+    case load_setting("ttl") do
+      nil ->
+        :ok
+
+      ttl_str ->
+        case Integer.parse(ttl_str) do
+          {ttl, _} -> :ets.insert(@settings_table, {:ttl, ttl})
+          _ -> :ok
+        end
+    end
+
+    {:noreply, state}
   end
 
   @impl true

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-export PATH="$HOME/.asdf/bin:$HOME/.asdf/shims:$PATH"
+export PATH="$HOME/.asdf/installs/erlang/27.3.4/bin:$HOME/.asdf/bin:$HOME/.asdf/shims:$PATH"
 [ -f .env ] && set -a && source .env && set +a
 
 RED='\033[0;31m'
@@ -13,8 +13,10 @@ step() { echo -e "${YELLOW}→ $1${NC}"; }
 pass() { echo -e "${GREEN}✓ $1${NC}"; }
 fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 
+step "Formatting code..."
+mix format
 step "Checking format..."
-mix format --check-formatted || fail "Code not formatted. Run: mix format"
+mix format --check-formatted || fail "Code not formatted"
 pass "Format OK"
 
 step "Compiling (warnings as errors)..."
