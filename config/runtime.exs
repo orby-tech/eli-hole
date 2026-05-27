@@ -23,6 +23,22 @@ end
 config :eli_hole, EliHoleWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PHX_PORT") || System.get_env("PORT") || "4000")]
 
+config :eli_hole,
+  dns_port: String.to_integer(System.get_env("DNS_PORT") || "5354")
+
+if dns_upstreams = System.get_env("DNS_UPSTREAMS") do
+  upstreams =
+    dns_upstreams
+    |> String.split(",", trim: true)
+    |> Enum.map(fn entry ->
+      [ip_str, port_str] = String.split(String.trim(entry), ":")
+      {:ok, ip} = :inet.parse_address(String.to_charlist(ip_str))
+      {ip, String.to_integer(port_str)}
+    end)
+
+  config :eli_hole, dns_upstreams: upstreams
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

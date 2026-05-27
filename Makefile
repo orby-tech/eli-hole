@@ -5,7 +5,7 @@ define load_env
 	set -a && [ -f .env ] && source .env && set +a
 endef
 
-.PHONY: setup server iex deps db.create db.migrate db.rollback db.reset db.seed test test.watch routes clean gen.secret gen.migration gen.context gen.live
+.PHONY: setup server iex deps db.create db.migrate db.rollback db.reset db.seed test test.watch routes clean gen.secret gen.migration gen.context gen.live precommit lint dialyzer
 
 setup: deps hooks.install db.create db.migrate
 
@@ -62,6 +62,9 @@ gen.live:
 hooks.install:
 	cp scripts/pre-commit .git/hooks/pre-commit
 	chmod +x .git/hooks/pre-commit
+
+precommit:
+	@$(load_env) && mix precommit
 
 lint:
 	@$(load_env) && mix format --check-formatted

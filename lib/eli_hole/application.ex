@@ -12,9 +12,9 @@ defmodule EliHole.Application do
       EliHole.Repo,
       {DNSCluster, query: Application.get_env(:eli_hole, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: EliHole.PubSub},
-      # Start a worker by calling: EliHole.Worker.start_link(arg)
-      # {EliHole.Worker, arg},
-      # Start to serve requests, typically the last entry
+      EliHole.DNS.Cache,
+      EliHole.DNS.QueryLog,
+      {EliHole.DNS.Server, port: Application.get_env(:eli_hole, :dns_port, 5354)},
       EliHoleWeb.Endpoint
     ]
 

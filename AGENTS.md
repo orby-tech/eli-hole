@@ -1,4 +1,20 @@
-This is a web application written using the Phoenix web framework.
+## Mandatory
+
+- **Always** keep `README.md` and this `AGENTS.md` file up to date when adding, removing, or changing features, modules, config, or architecture
+- Update README architecture diagram, features list, and env vars table as needed
+- Update this file's project description and guidelines when project scope changes
+
+---
+
+This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix web framework.
+
+### Project-specific modules
+
+- `lib/eli_hole/dns/server.ex` — UDP DNS listener (GenServer, `:gen_udp`, port 5354)
+- `lib/eli_hole/dns/resolver.ex` — forwards queries to upstream DNS, integrates cache
+- `lib/eli_hole/dns/cache.ex` — ETS-based DNS response cache with configurable TTL
+- `lib/eli_hole/dns/query_log.ex` — ETS query history with PubSub broadcast
+- `lib/eli_hole_web/live/query_log_live.ex` — real-time admin panel at `/admin/queries`
 
 ## Project guidelines
 

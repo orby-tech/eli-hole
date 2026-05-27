@@ -9,7 +9,9 @@ import Config
 
 config :eli_hole,
   ecto_repos: [EliHole.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  dns_port: 5354,
+  dns_upstreams: [{{8, 8, 8, 8}, 53}, {{8, 8, 4, 4}, 53}]
 
 # Configure the endpoint
 config :eli_hole, EliHoleWeb.Endpoint,
