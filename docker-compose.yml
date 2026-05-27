@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: eli_hole
       POSTGRES_PASSWORD: eli_hole
       POSTGRES_DB: eli_hole
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,19 +21,17 @@ services:
       context: .
       network: host
     restart: unless-stopped
+    network_mode: host
     env_file: .env
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "${PHX_PORT:-4410}:4000"
-      - "${DNS_PORT:-5354}:5354/udp"
     environment:
-      DATABASE_URL: ecto://eli_hole:eli_hole@db/eli_hole
+      DATABASE_URL: ecto://eli_hole:eli_hole@127.0.0.1/eli_hole
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?Generate with mix phx.gen.secret}"
       PHX_HOST: ${PHX_HOST:-localhost}
-      PHX_PORT: "4000"
-      DNS_PORT: "5354"
+      PHX_PORT: ${PHX_PORT:-4410}
+      DNS_PORT: ${DNS_PORT:-5354}
       DNS_UPSTREAMS: ${DNS_UPSTREAMS:-8.8.8.8:53,8.8.4.4:53}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-administrator}
