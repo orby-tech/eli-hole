@@ -112,7 +112,13 @@ defmodule EliHole.DNS.Cache do
     end
   end
 
-  def format_upstream({ip, port}) when is_tuple(ip), do: "#{:inet.ntoa(ip)}:#{port}"
+  def format_upstream({ip, port}) when is_tuple(ip) do
+    case :inet.ntoa(ip) do
+      {:error, _} -> "#{inspect(ip)}:#{port}"
+      charlist -> "#{charlist}:#{port}"
+    end
+  end
+
   def format_upstream({ip, port}) when is_binary(ip), do: "#{ip}:#{port}"
   def format_upstream(other), do: inspect(other)
 
