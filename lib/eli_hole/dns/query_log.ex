@@ -24,12 +24,67 @@ defmodule EliHole.DNS.QueryLog do
     all = :ets.tab2list(@table)
     total = length(all)
 
-    {resolved, failed} =
-      Enum.reduce(all, {0, 0}, fn {_ts, entry}, {r, f} ->
-        if entry.status == :ok, do: {r + 1, f}, else: {r, f + 1}
+    {resolved, blocked, failed} =
+      Enum.reduce(all, {0, 0, 0}, fn {_ts, entry}, {r, b, f} ->
+        cond do
+          entry.status == :ok -> {r + 1, b, f}
+          entry.status == :blocked -> {r, b + 1, f}
+          true -> {r, b, f + 1}
+        end
       end)
 
-    %{total: total, resolved: resolved, failed: failed}
+    %{total: total, resolved: resolved, blocked: blocked, failed: failed}
+  end
+
+  def top_domains(limit \\ 10) do
+    :ets.tab2list(@table)
+    |> Enum.map(fn {_ts, entry} -> entry.domain end)
+    |> Enum.frequencies()
+    |> Enum.sort_by(fn {_domain, count} -> count end, :desc)
+    |> Enum.take(limit)
+    |> Enum.map(fn {domain, count} -> %{domain: domain, count: count} end)
+  end
+
+  def top_clients(limit \\ 10) do
+    :ets.tab2list(@table)
+    |> Enum.map(fn {_ts, entry} -> entry.client end)
+    |> Enum.frequencies()
+    |> Enum.sort_by(fn {_client, count} -> count end, :desc)
+    |> Enum.take(limit)
+    |> Enum.map(fn {client, count} -> %{client: client, count: count} end)
+  end
+
+  def status_breakdown do
+    :ets.tab2list(@table)
+    |> Enum.map(fn {_ts, entry} -> entry.status end)
+    |> Enum.frequencies()
+    |> then(fn freqs ->
+      %{
+        ok: Map.get(freqs, :ok, 0),
+        error: Map.get(freqs, :error, 0),
+        blocked: Map.get(freqs, :blocked, 0)
+      }
+    end)
+  end
+
+  def queries_per_minute(minutes \\ 60) do
+    :ets.tab2list(@table)
+    |> Enum.map(fn {_ts, entry} -> String.slice(entry.time, 0, 5) end)
+    |> Enum.frequencies()
+    |> Enum.map(fn {minute, count} -> %{minute: minute, count: count} end)
+    |> Enum.sort_by(& &1.minute)
+    |> Enum.take(-minutes)
+  end
+
+  def recent_rate do
+    now = System.monotonic_time(:second)
+    cutoff = now - 60
+
+    :ets.tab2list(@table)
+    |> Enum.count(fn {ts, _entry} ->
+      System.convert_time_unit(ts, :native, :second) > cutoff
+    end)
+    |> then(&Float.round(&1 / 60, 1))
   end
 
   def clear do

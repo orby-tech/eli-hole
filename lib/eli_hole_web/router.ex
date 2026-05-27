@@ -26,8 +26,8 @@ defmodule EliHoleWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
-
     live "/setup", SetupLive
+    delete "/logout", SessionController, :delete
   end
 
   scope "/", EliHoleWeb do
@@ -37,16 +37,13 @@ defmodule EliHoleWeb.Router do
     post "/login", SessionController, :create
   end
 
-  scope "/", EliHoleWeb do
-    pipe_through :browser
-
-    delete "/logout", SessionController, :delete
-  end
-
   scope "/admin", EliHoleWeb do
     pipe_through [:browser, :require_auth]
 
+    live "/", DashboardLive
     live "/queries", QueryLogLive
+    live "/blocklist", BlocklistLive
+    live "/settings", SettingsLive
   end
 
   if Application.compile_env(:eli_hole, :dev_routes) do

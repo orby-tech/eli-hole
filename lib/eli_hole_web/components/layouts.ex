@@ -26,6 +26,7 @@ defmodule EliHoleWeb.Layouts do
 
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
+  attr :active_nav, :atom, default: nil, doc: "currently active nav item"
 
   attr :current_scope, :map,
     default: nil,
@@ -35,40 +36,82 @@ defmodule EliHoleWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
-        </a>
-      </div>
-      <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://hexdocs.pm/phoenix/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
-          </li>
-        </ul>
-      </div>
-    </header>
+    <div class="flex min-h-screen">
+      <aside class="hidden md:flex flex-col w-56 shrink-0 bg-base-200 border-r border-base-300">
+        <div class="p-4 border-b border-base-300">
+          <.link navigate={~p"/admin"} class="flex items-center gap-2">
+            <.icon name="hero-shield-check" class="size-7 text-primary" />
+            <span class="text-lg font-bold tracking-tight">EliHole</span>
+          </.link>
+          <p class="text-xs opacity-50 mt-0.5">DNS Sinkhole</p>
+        </div>
 
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
-        {render_slot(@inner_block)}
+        <nav class="flex-1 p-3 space-y-1">
+          <.nav_item href={~p"/admin"} icon="hero-chart-bar" label="Dashboard" active={@active_nav == :dashboard} />
+          <.nav_item href={~p"/admin/queries"} icon="hero-list-bullet" label="Query Log" active={@active_nav == :queries} />
+          <.nav_item href={~p"/admin/blocklist"} icon="hero-shield-exclamation" label="Blocklist" active={@active_nav == :blocklist} />
+          <.nav_item href={~p"/admin/settings"} icon="hero-cog-6-tooth" label="Settings" active={@active_nav == :settings} />
+        </nav>
+
+        <div class="p-3 border-t border-base-300 space-y-3">
+          <.theme_toggle />
+          <.link href={~p"/logout"} method="delete" class="flex items-center gap-2 text-sm opacity-60 hover:opacity-100 transition-opacity px-2">
+            <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" /> Logout
+          </.link>
+        </div>
+      </aside>
+
+      <div class="flex-1 flex flex-col min-w-0">
+        <header class="md:hidden flex items-center justify-between px-4 py-3 bg-base-200 border-b border-base-300">
+          <div class="flex items-center gap-2">
+            <.icon name="hero-shield-check" class="size-6 text-primary" />
+            <span class="font-bold">EliHole</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <.link navigate={~p"/admin"} class="btn btn-ghost btn-sm">
+              <.icon name="hero-chart-bar" class="size-4" />
+            </.link>
+            <.link navigate={~p"/admin/queries"} class="btn btn-ghost btn-sm">
+              <.icon name="hero-list-bullet" class="size-4" />
+            </.link>
+            <.link navigate={~p"/admin/blocklist"} class="btn btn-ghost btn-sm">
+              <.icon name="hero-shield-exclamation" class="size-4" />
+            </.link>
+            <.link navigate={~p"/admin/settings"} class="btn btn-ghost btn-sm">
+              <.icon name="hero-cog-6-tooth" class="size-4" />
+            </.link>
+          </div>
+        </header>
+
+        <main class="flex-1 p-4 sm:p-6 overflow-auto">
+          <div class="mx-auto max-w-6xl">
+            {render_slot(@inner_block)}
+          </div>
+        </main>
       </div>
-    </main>
+    </div>
 
     <.flash_group flash={@flash} />
+    """
+  end
+
+  attr :href, :string, required: true
+  attr :icon, :string, required: true
+  attr :label, :string, required: true
+  attr :active, :boolean, default: false
+
+  defp nav_item(assigns) do
+    ~H"""
+    <.link
+      navigate={@href}
+      class={[
+        "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+        if(@active, do: "bg-primary text-primary-content", else: "hover:bg-base-300 opacity-70 hover:opacity-100")
+      ]}
+    >
+      <.icon name={@icon} class="size-5" />
+      {@label}
+    </.link>
     """
   end
 

@@ -8,7 +8,7 @@ defmodule EliHoleWeb.SessionController do
       {:ok, user} ->
         conn
         |> put_session(:admin_user_id, user.id)
-        |> redirect(to: "/admin/queries")
+        |> redirect(to: "/admin")
 
       {:error, _} ->
         conn

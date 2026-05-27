@@ -13,6 +13,7 @@ defmodule EliHole.Application do
       {DNSCluster, query: Application.get_env(:eli_hole, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: EliHole.PubSub},
       EliHole.DNS.Cache,
+      EliHole.DNS.Blocklist,
       EliHole.DNS.SpeedTracker,
       EliHole.DNS.QueryLog,
       {EliHole.DNS.Server, port: Application.get_env(:eli_hole, :dns_port, 5354)},

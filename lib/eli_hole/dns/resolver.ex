@@ -1,5 +1,5 @@
 defmodule EliHole.DNS.Resolver do
-  alias EliHole.DNS.{Cache, SpeedTracker}
+  alias EliHole.DNS.{Blocklist, Cache, SpeedTracker}
 
   require Logger
 
@@ -9,13 +9,18 @@ defmodule EliHole.DNS.Resolver do
   def resolve(query_packet) when is_binary(query_packet) do
     {domain, type} = extract_query_info(query_packet)
 
-    case Cache.lookup(domain, type) do
-      {:hit, cached_response, original_upstream} ->
-        Logger.debug("Cache hit: #{domain}/#{type}")
-        {:ok, "cache (#{original_upstream})", rewrite_id(query_packet, cached_response)}
+    if Blocklist.blocked?(domain) do
+      Logger.debug("Blocked: #{domain}/#{type}")
+      {:blocked, nil, build_blocked_response(query_packet, type)}
+    else
+      case Cache.lookup(domain, type) do
+        {:hit, cached_response, original_upstream} ->
+          Logger.debug("Cache hit: #{domain}/#{type}")
+          {:ok, "cache (#{original_upstream})", rewrite_id(query_packet, cached_response)}
 
-      :miss ->
-        resolve_upstream(query_packet, domain, type)
+        :miss ->
+          resolve_upstream(query_packet, domain, type)
+      end
     end
   end
 
@@ -152,6 +157,48 @@ defmodule EliHole.DNS.Resolver do
     <<query_id::16, _::binary>> = query_packet
     <<_::16, rest::binary>> = cached_response
     <<query_id::16, rest::binary>>
+  end
+
+  defp build_blocked_response(query_packet, query_type) do
+    case :inet_dns.decode(query_packet) do
+      {:ok, record} ->
+        header = :inet_dns.msg(record, :header)
+        id = :inet_dns.header(header, :id)
+        qdlist = :inet_dns.msg(record, :qdlist)
+
+        if query_type == "A" do
+          q = List.first(qdlist)
+          domain = :inet_dns.dns_query(q, :domain)
+
+          response_header =
+            :inet_dns.make_header(id: id, qr: true, opcode: :query, aa: true, rcode: 0, ra: true)
+
+          answer =
+            :inet_dns.make_rr(domain: domain, type: :a, class: :in, ttl: 0, data: {0, 0, 0, 0})
+
+          msg = :inet_dns.make_msg(header: response_header, qdlist: qdlist, anlist: [answer])
+
+          case :inet_dns.encode(msg) do
+            {:ok, response} -> response
+            response when is_binary(response) -> response
+          end
+        else
+          response_header =
+            :inet_dns.make_header(id: id, qr: true, opcode: :query, aa: true, rcode: 3, ra: true)
+
+          msg = :inet_dns.make_msg(header: response_header, qdlist: qdlist)
+
+          case :inet_dns.encode(msg) do
+            {:ok, response} -> response
+            response when is_binary(response) -> response
+          end
+        end
+
+      {:error, _} ->
+        <<>>
+    end
+  rescue
+    _ -> <<>>
   end
 
   defp build_servfail(query_packet) do

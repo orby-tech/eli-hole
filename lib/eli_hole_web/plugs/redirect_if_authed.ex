@@ -7,7 +7,7 @@ defmodule EliHoleWeb.Plugs.RedirectIfAuthed do
   def call(conn, _opts) do
     if get_session(conn, :admin_user_id) do
       conn
-      |> redirect(to: "/admin/queries")
+      |> redirect(to: "/admin")
       |> halt()
     else
       conn
