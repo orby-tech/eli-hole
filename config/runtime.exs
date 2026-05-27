@@ -41,6 +41,14 @@ if dns_upstreams = System.get_env("DNS_UPSTREAMS") do
   config :eli_hole, dns_upstreams: upstreams
 end
 
+if dsn = System.get_env("SENTRY_DSN") do
+  config :sentry,
+    dsn: dsn,
+    environment_name: config_env(),
+    enable_source_code_context: true,
+    root_source_code_paths: [File.cwd!()]
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

@@ -40,6 +40,7 @@ Environment variables:
 | `DNS_UPSTREAMS` | `8.8.8.8:53,8.8.4.4:53` | Comma-separated upstream DNS servers |
 | `PHX_PORT` / `PORT` | `4000` | Web UI port |
 | `DATABASE_URL` | (dev default) | PostgreSQL connection string |
+| `SENTRY_DSN` | (none) | GlitchTip/Sentry DSN for error tracking |
 
 Cache TTL is configurable at runtime from the admin panel (`/admin/queries`).
 
