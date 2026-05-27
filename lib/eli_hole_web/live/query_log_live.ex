@@ -14,11 +14,18 @@ defmodule EliHoleWeb.QueryLogLive do
     stats = QueryLog.stats()
     cache_stats = Cache.stats()
 
+    upstreams = Cache.get_upstreams()
+    active_presets = detect_active_presets(upstreams)
+
     {:ok,
      socket
      |> assign(:stats, stats)
      |> assign(:cache_stats, cache_stats)
      |> assign(:ttl_input, to_string(cache_stats.ttl))
+     |> assign(:upstreams, upstreams)
+     |> assign(:active_presets, active_presets)
+     |> assign(:custom_upstream_input, "")
+     |> assign(:presets, Cache.presets())
      |> stream(:queries, queries)}
   end
 
@@ -48,6 +55,14 @@ defmodule EliHoleWeb.QueryLogLive do
   end
 
   @impl true
+  def handle_info({:upstreams_changed, upstreams}, socket) do
+    {:noreply,
+     socket
+     |> assign(:upstreams, upstreams)
+     |> assign(:active_presets, detect_active_presets(upstreams))}
+  end
+
+  @impl true
   def handle_event("clear", _, socket) do
     QueryLog.clear()
 
@@ -73,6 +88,82 @@ defmodule EliHoleWeb.QueryLogLive do
   def handle_event("flush_cache", _, socket) do
     Cache.flush()
     {:noreply, assign(socket, :cache_stats, Cache.stats())}
+  end
+
+  @impl true
+  def handle_event("toggle_preset", %{"preset" => preset}, socket) do
+    presets = Cache.presets()
+    preset_servers = Map.get(presets, preset, [])
+    active = socket.assigns.active_presets
+
+    {new_upstreams, new_active} =
+      if MapSet.member?(active, preset) do
+        {socket.assigns.upstreams -- preset_servers, MapSet.delete(active, preset)}
+      else
+        {Enum.uniq(socket.assigns.upstreams ++ preset_servers), MapSet.put(active, preset)}
+      end
+
+    new_upstreams = if new_upstreams == [], do: preset_servers, else: new_upstreams
+    new_active = if new_upstreams == preset_servers, do: MapSet.new([preset]), else: new_active
+
+    Cache.set_upstreams(new_upstreams)
+    Cache.flush()
+
+    {:noreply,
+     socket
+     |> assign(:upstreams, new_upstreams)
+     |> assign(:active_presets, new_active)
+     |> assign(:cache_stats, Cache.stats())}
+  end
+
+  @impl true
+  def handle_event("add_upstream", %{"upstream" => upstream_str}, socket) do
+    case Cache.parse_upstream(upstream_str) do
+      {:ok, upstream} ->
+        new_upstreams = socket.assigns.upstreams ++ [upstream]
+        Cache.set_upstreams(new_upstreams)
+        Cache.flush()
+
+        {:noreply,
+         socket
+         |> assign(:upstreams, new_upstreams)
+         |> assign(:active_presets, detect_active_presets(new_upstreams))
+         |> assign(:custom_upstream_input, "")
+         |> assign(:cache_stats, Cache.stats())}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Invalid upstream format. Use IP:PORT or IP")}
+    end
+  end
+
+  @impl true
+  def handle_event("remove_upstream", %{"index" => index_str}, socket) do
+    index = String.to_integer(index_str)
+    new_upstreams = List.delete_at(socket.assigns.upstreams, index)
+
+    if new_upstreams == [] do
+      {:noreply, put_flash(socket, :error, "Need at least one upstream")}
+    else
+      Cache.set_upstreams(new_upstreams)
+      Cache.flush()
+
+      {:noreply,
+       socket
+       |> assign(:upstreams, new_upstreams)
+       |> assign(:active_presets, detect_active_presets(new_upstreams))
+       |> assign(:cache_stats, Cache.stats())}
+    end
+  end
+
+  defp detect_active_presets(upstreams) do
+    upstream_set = MapSet.new(upstreams)
+
+    Cache.presets()
+    |> Enum.filter(fn {_name, servers} ->
+      MapSet.subset?(MapSet.new(servers), upstream_set)
+    end)
+    |> Enum.map(fn {name, _} -> name end)
+    |> MapSet.new()
   end
 
   @impl true
@@ -142,6 +233,48 @@ defmodule EliHoleWeb.QueryLogLive do
               class="input input-sm input-bordered w-28"
             />
             <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+          </form>
+        </div>
+
+        <div class="bg-base-200 rounded-xl p-4 space-y-3">
+          <h2 class="text-lg font-semibold">DNS Providers</h2>
+          <div class="flex flex-wrap gap-2">
+            <button
+              :for={{name, _servers} <- @presets}
+              phx-click="toggle_preset"
+              phx-value-preset={name}
+              class={[
+                "btn btn-sm",
+                if(MapSet.member?(@active_presets, name), do: "btn-primary", else: "btn-outline")
+              ]}
+            >
+              {String.capitalize(name)}
+            </button>
+          </div>
+          <div class="space-y-1">
+            <div
+              :for={{upstream, idx} <- Enum.with_index(@upstreams)}
+              class="flex items-center gap-2"
+            >
+              <span class="font-mono text-sm">{Cache.format_upstream(upstream)}</span>
+              <button
+                phx-click="remove_upstream"
+                phx-value-index={idx}
+                class="btn btn-ghost btn-xs text-error"
+              >
+                <.icon name="hero-x-mark" class="size-4" />
+              </button>
+            </div>
+          </div>
+          <form phx-submit="add_upstream" class="flex items-center gap-2">
+            <input
+              type="text"
+              name="upstream"
+              value={@custom_upstream_input}
+              placeholder="1.1.1.1:53"
+              class="input input-sm input-bordered w-40"
+            />
+            <button type="submit" class="btn btn-primary btn-sm">Add</button>
           </form>
         </div>
 

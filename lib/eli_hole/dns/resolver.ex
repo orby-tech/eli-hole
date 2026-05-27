@@ -19,7 +19,7 @@ defmodule EliHole.DNS.Resolver do
   end
 
   defp resolve_upstream(query_packet, domain, type) do
-    upstreams = Application.get_env(:eli_hole, :dns_upstreams, [{{8, 8, 8, 8}, 53}])
+    upstreams = Cache.get_upstreams()
 
     case forward(query_packet, upstreams) do
       {:ok, {upstream, response}} ->

@@ -43,6 +43,62 @@ defmodule EliHole.DNS.Cache do
     Phoenix.PubSub.broadcast(EliHole.PubSub, "dns:cache_settings", {:ttl_changed, seconds})
   end
 
+  @presets %{
+    "google" => [{{8, 8, 8, 8}, 53}, {{8, 8, 4, 4}, 53}],
+    "cloudflare" => [{{1, 1, 1, 1}, 53}, {{1, 0, 0, 1}, 53}],
+    "quad9" => [{{9, 9, 9, 9}, 53}, {{149, 112, 112, 112}, 53}],
+    "opendns" => [{{208, 67, 222, 222}, 53}, {{208, 67, 220, 220}, 53}]
+  }
+
+  def presets, do: @presets
+
+  def get_upstreams do
+    case :ets.lookup(@settings_table, :upstreams) do
+      [{:upstreams, val}] -> val
+      [] -> Application.get_env(:eli_hole, :dns_upstreams, [{{8, 8, 8, 8}, 53}])
+    end
+  end
+
+  def set_upstreams(upstreams) when is_list(upstreams) do
+    :ets.insert(@settings_table, {:upstreams, upstreams})
+
+    Phoenix.PubSub.broadcast(
+      EliHole.PubSub,
+      "dns:cache_settings",
+      {:upstreams_changed, upstreams}
+    )
+  end
+
+  def set_preset(name) when is_binary(name) do
+    case Map.get(@presets, name) do
+      nil -> {:error, :unknown_preset}
+      upstreams -> set_upstreams(upstreams)
+    end
+  end
+
+  def format_upstream({ip, port}), do: "#{:inet.ntoa(ip)}:#{port}"
+
+  def parse_upstream(str) do
+    case String.split(String.trim(str), ":") do
+      [ip_str, port_str] ->
+        with {:ok, ip} <- :inet.parse_address(String.to_charlist(ip_str)),
+             {port, _} <- Integer.parse(port_str) do
+          {:ok, {ip, port}}
+        else
+          _ -> {:error, :invalid}
+        end
+
+      [ip_str] ->
+        case :inet.parse_address(String.to_charlist(ip_str)) do
+          {:ok, ip} -> {:ok, {ip, 53}}
+          _ -> {:error, :invalid}
+        end
+
+      _ ->
+        {:error, :invalid}
+    end
+  end
+
   def stats do
     now = System.monotonic_time(:second)
     all = :ets.tab2list(@table)
