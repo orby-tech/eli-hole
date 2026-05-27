@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -e
+
+export PATH="$HOME/.asdf/bin:$HOME/.asdf/shims:$PATH"
+[ -f .env ] && set -a && source .env && set +a
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+step() { echo -e "${YELLOW}→ $1${NC}"; }
+pass() { echo -e "${GREEN}✓ $1${NC}"; }
+fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
+
+step "Checking format..."
+mix format --check-formatted || fail "Code not formatted. Run: mix format"
+pass "Format OK"
+
+step "Compiling (warnings as errors)..."
+mix compile --warnings-as-errors || fail "Compilation warnings found"
+pass "Compile OK"
+
+step "Running Credo..."
+mix credo --strict || fail "Credo issues found"
+pass "Credo OK"
+
+step "Running Sobelow (security)..."
+mix sobelow --config || fail "Security issues found"
+pass "Sobelow OK"
+
+step "Checking unused deps..."
+mix deps.unlock --check-unused || fail "Unused deps in mix.lock"
+pass "Deps OK"
+
+step "Running tests..."
+mix test || fail "Tests failed"
+pass "Tests OK"
+
+echo -e "${GREEN}All checks passed!${NC}"
