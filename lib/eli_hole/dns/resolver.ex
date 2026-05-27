@@ -30,7 +30,7 @@ defmodule EliHole.DNS.Resolver do
 
     case race(query_packet, racers) do
       {:ok, {{ip, port} = upstream, response, time_ms}} ->
-        upstream_str = "#{:inet.ntoa(ip)}:#{port}"
+        upstream_str = Cache.format_upstream({ip, port})
         SpeedTracker.record(upstream, time_ms)
         Logger.debug("Resolved via #{upstream_str} (#{time_ms}ms, raced #{length(racers)})")
         Cache.put(domain, type, response, upstream_str)
@@ -39,7 +39,7 @@ defmodule EliHole.DNS.Resolver do
       {:error, _reason} ->
         case fallback_forward(query_packet, upstreams -- racers) do
           {:ok, {{ip, port}, response}} ->
-            upstream_str = "#{:inet.ntoa(ip)}:#{port}"
+            upstream_str = Cache.format_upstream({ip, port})
             Cache.put(domain, type, response, upstream_str)
             {:ok, upstream_str, response}
 
