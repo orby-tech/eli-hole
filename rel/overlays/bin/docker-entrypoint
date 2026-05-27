@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+echo "Running migrations..."
+bin/eli_hole eval "EliHole.Release.migrate()"
+
+echo "Starting EliHole..."
+exec bin/eli_hole start

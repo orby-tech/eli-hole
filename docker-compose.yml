@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eli_hole
+      POSTGRES_PASSWORD: eli_hole
+      POSTGRES_DB: eli_hole
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eli_hole"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4410:4000"
+      - "453:5354/udp"
+    environment:
+      DATABASE_URL: ecto://eli_hole:eli_hole@db/eli_hole
+      SECRET_KEY_BASE: "${SECRET_KEY_BASE:?Generate with mix phx.gen.secret}"
+      PHX_HOST: ${PHX_HOST:-localhost}
+      DNS_PORT: "5354"
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-administrator}
+
+volumes:
+
+  pgdata:

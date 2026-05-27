@@ -1,0 +1,10 @@
+_build/
+deps/
+.git/
+.env
+.elixir_ls/
+tmp/
+cover/
+doc/
+test/
+.claude/
