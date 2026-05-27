@@ -9,7 +9,6 @@ defmodule EliHoleWeb.BlocklistLive do
       Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:blocklist")
     end
 
-    entries = Blocklist.list_entries()
     stats = Blocklist.stats()
 
     {:ok,
@@ -17,16 +16,18 @@ defmodule EliHoleWeb.BlocklistLive do
      |> assign(:active_nav, :blocklist)
      |> assign(:stats, stats)
      |> assign(:search_query, "")
+     |> assign(:page, 1)
      |> assign(:show_import, false)
      |> assign(:import_text, "")
      |> assign(:import_format, "domains")
      |> assign(:form, to_form(BlocklistEntry.changeset(%BlocklistEntry{}, %{})))
-     |> stream(:entries, entries)}
+     |> stream(:entries, load_entries("", 1))}
   end
 
   @impl true
   def handle_info(:blocklist_changed, socket) do
-    entries = load_entries(socket.assigns.search_query)
+    page = socket.assigns.page
+    entries = load_entries(socket.assigns.search_query, page)
     stats = Blocklist.stats()
 
     {:noreply,
@@ -39,13 +40,12 @@ defmodule EliHoleWeb.BlocklistLive do
   def handle_event("add_entry", %{"blocklist_entry" => params}, socket) do
     case Blocklist.create_entry(params) do
       {:ok, _entry} ->
-        entries = load_entries(socket.assigns.search_query)
-
         {:noreply,
          socket
          |> assign(:form, to_form(BlocklistEntry.changeset(%BlocklistEntry{}, %{})))
          |> assign(:stats, Blocklist.stats())
-         |> stream(:entries, entries, reset: true)
+         |> assign(:page, 1)
+         |> stream(:entries, load_entries(socket.assigns.search_query, 1), reset: true)
          |> put_flash(:info, "Domain added to blocklist")}
 
       {:error, changeset} ->
@@ -67,35 +67,46 @@ defmodule EliHoleWeb.BlocklistLive do
   def handle_event("toggle_entry", %{"id" => id}, socket) do
     entry = Blocklist.get_entry!(id)
     Blocklist.update_entry(entry, %{enabled: !entry.enabled})
-    entries = load_entries(socket.assigns.search_query)
 
     {:noreply,
      socket
      |> assign(:stats, Blocklist.stats())
-     |> stream(:entries, entries, reset: true)}
+     |> stream(:entries, load_entries(socket.assigns.search_query, socket.assigns.page),
+       reset: true
+     )}
   end
 
   @impl true
   def handle_event("delete_entry", %{"id" => id}, socket) do
     entry = Blocklist.get_entry!(id)
     Blocklist.delete_entry(entry)
-    entries = load_entries(socket.assigns.search_query)
 
     {:noreply,
      socket
      |> assign(:stats, Blocklist.stats())
-     |> stream(:entries, entries, reset: true)
+     |> stream(:entries, load_entries(socket.assigns.search_query, socket.assigns.page),
+       reset: true
+     )
      |> put_flash(:info, "Entry removed")}
   end
 
   @impl true
   def handle_event("search", %{"query" => query}, socket) do
-    entries = load_entries(query)
-
     {:noreply,
      socket
      |> assign(:search_query, query)
-     |> stream(:entries, entries, reset: true)}
+     |> assign(:page, 1)
+     |> stream(:entries, load_entries(query, 1), reset: true)}
+  end
+
+  @impl true
+  def handle_event("page", %{"page" => page_str}, socket) do
+    page = String.to_integer(page_str)
+
+    {:noreply,
+     socket
+     |> assign(:page, page)
+     |> stream(:entries, load_entries(socket.assigns.search_query, page), reset: true)}
   end
 
   @impl true
@@ -116,14 +127,13 @@ defmodule EliHoleWeb.BlocklistLive do
         _ -> Blocklist.import_domains(text)
       end
 
-    entries = load_entries(socket.assigns.search_query)
-
     {:noreply,
      socket
      |> assign(:stats, Blocklist.stats())
      |> assign(:show_import, false)
      |> assign(:import_text, "")
-     |> stream(:entries, entries, reset: true)
+     |> assign(:page, 1)
+     |> stream(:entries, load_entries(socket.assigns.search_query, 1), reset: true)
      |> put_flash(:info, "Imported #{count} domains")}
   end
 
@@ -133,8 +143,10 @@ defmodule EliHoleWeb.BlocklistLive do
     {:noreply, put_flash(socket, :info, "Blocklist cache reloaded")}
   end
 
-  defp load_entries(""), do: Blocklist.list_entries()
-  defp load_entries(query), do: Blocklist.search_entries(query)
+  defp load_entries("", page), do: Blocklist.list_entries(page: page)
+  defp load_entries(query, page), do: Blocklist.search_entries(query, page: page)
+
+  defp total_pages(total), do: max(1, ceil(total / 50))
 
   @impl true
   def render(assigns) do
@@ -331,6 +343,31 @@ defmodule EliHoleWeb.BlocklistLive do
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <%!-- Pagination --%>
+        <div class="flex items-center justify-between">
+          <span class="text-sm opacity-60">
+            Page {@page} of {total_pages(@stats.total)}
+          </span>
+          <div class="flex gap-1">
+            <button
+              :if={@page > 1}
+              phx-click="page"
+              phx-value-page={@page - 1}
+              class="btn btn-sm btn-outline"
+            >
+              <.icon name="hero-chevron-left" class="size-4" />
+            </button>
+            <button
+              :if={@page < total_pages(@stats.total)}
+              phx-click="page"
+              phx-value-page={@page + 1}
+              class="btn btn-sm btn-outline"
+            >
+              <.icon name="hero-chevron-right" class="size-4" />
+            </button>
+          </div>
         </div>
       </div>
     </Layouts.app>

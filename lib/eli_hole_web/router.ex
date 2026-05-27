@@ -44,6 +44,8 @@ defmodule EliHoleWeb.Router do
     live "/queries", QueryLogLive
     live "/blocklist", BlocklistLive
     live "/settings", SettingsLive
+    live "/gravity", GravityLive
+    get "/teleporter/export", TeleporterController, :export
   end
 
   if Application.compile_env(:eli_hole, :dev_routes) do

@@ -1,7 +1,7 @@
 defmodule EliHoleWeb.SettingsLive do
   use EliHoleWeb, :live_view
 
-  alias EliHole.DNS.{Cache, Providers, SpeedTracker}
+  alias EliHole.DNS.{Blocklist, Cache, Providers, SpeedTracker, Teleporter}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,7 +23,13 @@ defmodule EliHoleWeb.SettingsLive do
      |> assign(:providers, providers)
      |> assign(:custom_upstream_input, "")
      |> assign(:presets, Cache.presets())
-     |> assign(:speed_stats, SpeedTracker.stats())}
+     |> assign(:speed_stats, SpeedTracker.stats())
+     |> assign(:import_result, nil)
+     |> allow_upload(:teleporter_file,
+       accept: ~w(.gz),
+       max_entries: 1,
+       max_file_size: 50_000_000
+     )}
   end
 
   @impl true
@@ -95,6 +101,53 @@ defmodule EliHoleWeb.SettingsLive do
       provider = Providers.get!(id)
       Providers.delete(provider)
       reload_providers(socket)
+    end
+  end
+
+  @impl true
+  def handle_event("validate_upload", _params, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("import_teleporter", _params, socket) do
+    [tar_binary] =
+      consume_uploaded_entries(socket, :teleporter_file, fn %{path: path}, _entry ->
+        {:ok, File.read!(path)}
+      end)
+
+    result =
+      case Teleporter.detect_format(tar_binary) do
+        :pihole -> Teleporter.import_pihole(tar_binary)
+        :elihole -> Teleporter.import_elihole(tar_binary)
+        :unknown -> {:error, "Unknown backup format"}
+      end
+
+    case result do
+      {:ok, summary} ->
+        Blocklist.flush_cache()
+        Cache.load_upstreams_from_db()
+
+        gravity = Map.get(summary, :gravity, 0)
+
+        msg =
+          "Imported #{summary.blocklist} blocklist entries, #{summary.providers} providers" <>
+            if(gravity > 0, do: ", #{gravity} adlists (run Gravity update to download)", else: "") <>
+            if(Map.get(summary, :skipped, []) != [],
+              do: ". Skipped: #{Enum.join(summary.skipped, ", ")}",
+              else: ""
+            )
+
+        {:noreply,
+         socket
+         |> assign(:providers, Providers.list_all())
+         |> assign(:upstreams, Cache.get_upstreams())
+         |> assign(:active_presets, detect_active_presets(Cache.get_upstreams()))
+         |> assign(:speed_stats, SpeedTracker.stats())
+         |> put_flash(:info, msg)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Import failed: #{reason}")}
     end
   end
 
@@ -257,6 +310,71 @@ defmodule EliHoleWeb.SettingsLive do
             />
             <button type="submit" class="btn btn-primary btn-sm">Apply</button>
           </form>
+        </div>
+        <div class="bg-base-200 rounded-xl p-4 space-y-3">
+          <h2 class="text-lg font-semibold">Teleporter</h2>
+          <p class="text-sm opacity-60">
+            Import from Pi-hole backup or EliHole export. Export current config.
+          </p>
+
+          <div class="flex flex-wrap gap-4">
+            <div class="flex-1 min-w-[250px] space-y-3">
+              <h3 class="text-sm font-medium">Import</h3>
+              <form
+                id="teleporter-import-form"
+                phx-submit="import_teleporter"
+                phx-change="validate_upload"
+              >
+                <div
+                  class="border-2 border-dashed border-base-300 rounded-lg p-4 text-center"
+                  phx-drop-target={@uploads.teleporter_file.ref}
+                >
+                  <.live_file_input upload={@uploads.teleporter_file} class="hidden" />
+                  <%= if @uploads.teleporter_file.entries == [] do %>
+                    <label for={@uploads.teleporter_file.ref} class="cursor-pointer space-y-2">
+                      <.icon name="hero-arrow-up-tray" class="size-8 mx-auto opacity-40" />
+                      <p class="text-sm opacity-60">Drop .tar.gz or click to browse</p>
+                      <p class="text-xs opacity-40">Pi-hole Teleporter or EliHole backup</p>
+                    </label>
+                  <% else %>
+                    <%= for entry <- @uploads.teleporter_file.entries do %>
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm font-mono">{entry.client_name}</span>
+                        <span class="text-xs opacity-60">
+                          {Float.round(entry.client_size / 1_000_000, 2)} MB
+                        </span>
+                      </div>
+                      <%= for err <- upload_errors(@uploads.teleporter_file, entry) do %>
+                        <p class="text-error text-xs">{inspect(err)}</p>
+                      <% end %>
+                    <% end %>
+                  <% end %>
+                </div>
+                <div class="flex justify-end mt-2">
+                  <button
+                    type="submit"
+                    class="btn btn-primary btn-sm"
+                    disabled={@uploads.teleporter_file.entries == []}
+                  >
+                    <.icon name="hero-arrow-down-tray" class="size-4" /> Import
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="flex-1 min-w-[200px] space-y-3">
+              <h3 class="text-sm font-medium">Export</h3>
+              <p class="text-xs opacity-60">
+                Download blocklist entries and DNS providers as .tar.gz backup.
+              </p>
+              <a
+                href={~p"/admin/teleporter/export"}
+                class="btn btn-outline btn-sm"
+              >
+                <.icon name="hero-arrow-down-tray" class="size-4" /> Export Config
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </Layouts.app>

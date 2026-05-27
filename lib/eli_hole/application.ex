@@ -17,6 +17,7 @@ defmodule EliHole.Application do
       EliHole.DNS.Cache,
       EliHole.DNS.Blocklist,
       EliHole.DNS.SpeedTracker,
+      EliHole.DNS.Gravity,
       EliHole.DNS.QueryLog,
       {EliHole.DNS.Server, port: Application.get_env(:eli_hole, :dns_port, 5354)},
       EliHoleWeb.Endpoint

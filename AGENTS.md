@@ -14,7 +14,12 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole/dns/resolver.ex` — forwards queries to upstream DNS, integrates cache
 - `lib/eli_hole/dns/cache.ex` — ETS-based DNS response cache with configurable TTL
 - `lib/eli_hole/dns/query_log.ex` — ETS query history with PubSub broadcast
+- `lib/eli_hole/dns/adlist.ex` — Adlist Ecto schema (subscription URLs)
+- `lib/eli_hole/dns/adlists.ex` — Adlist CRUD context
+- `lib/eli_hole/dns/gravity.ex` — Gravity GenServer: scheduled + manual adlist download/sync
+- `lib/eli_hole/dns/teleporter.ex` — Pi-hole teleporter import/export
 - `lib/eli_hole_web/live/query_log_live.ex` — real-time admin panel at `/admin/queries`
+- `lib/eli_hole_web/live/gravity_live.ex` — gravity/adlist management at `/admin/gravity`
 
 ## Project guidelines
 

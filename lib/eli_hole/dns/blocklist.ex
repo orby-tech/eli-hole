@@ -27,10 +27,17 @@ defmodule EliHole.DNS.Blocklist do
 
   def blocked?(_), do: false
 
-  @doc "List all blocklist entries ordered by inserted_at desc."
-  def list_entries do
+  @page_size 50
+
+  @doc "List blocklist entries with pagination."
+  def list_entries(opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, @page_size)
+
     BlocklistEntry
     |> order_by(desc: :inserted_at)
+    |> limit(^per_page)
+    |> offset(^((page - 1) * per_page))
     |> Repo.all()
   end
 
@@ -42,14 +49,18 @@ defmodule EliHole.DNS.Blocklist do
     |> Repo.all()
   end
 
-  @doc "Search entries by domain substring."
-  def search_entries(query) when is_binary(query) do
+  @doc "Search entries by domain substring with pagination."
+  def search_entries(query, opts \\ []) when is_binary(query) do
+    page = Keyword.get(opts, :page, 1)
+    per_page = Keyword.get(opts, :per_page, @page_size)
     escaped = query |> String.replace(~r/[%_\\]/, "\\\\\\0")
     pattern = "%#{escaped}%"
 
     BlocklistEntry
     |> where([e], ilike(e.domain, ^pattern))
     |> order_by(desc: :inserted_at)
+    |> limit(^per_page)
+    |> offset(^((page - 1) * per_page))
     |> Repo.all()
   end
 
