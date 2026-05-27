@@ -1,3 +1,5 @@
+env_file: .env
+
 services:
   db:
     image: postgres:17-alpine
@@ -21,8 +23,8 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "4410:4000"
-      - "453:5354/udp"
+      - "${PHX_PORT:-4410}:4000"
+      - "${DNS_PORT:-5354}:5354/udp"
     environment:
       DATABASE_URL: ecto://eli_hole:eli_hole@db/eli_hole
       SECRET_KEY_BASE: "${SECRET_KEY_BASE:?Generate with mix phx.gen.secret}"
