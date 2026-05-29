@@ -23,6 +23,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - **Exact match** — `ads.example.com`
 - **Wildcard match** — `*.example.com` blocks all subdomains
 - **Regex match** — `/(ads|tracking)\..*\.com/`
+- **CNAME deep inspection** — inspects the answer section of resolved responses and blocks clean-looking domains whose CNAME target points to a blocked domain (CNAME cloaking defense); whitelist still overrides
 - ETS-backed lookup for sub-millisecond blocking decisions
 - Manual blocklist entry CRUD with search and pagination
 - Bulk import from hosts-file or domain-list formats
@@ -248,7 +249,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 ## TODO
 
 ### Core DNS
-- [ ] **CNAME deep inspection** — detect blocked domains hiding behind CNAMEs
 - [ ] **DNS-over-HTTPS (DoH)** — accept DoH queries
 - [ ] **DNS-over-TLS (DoT)** — accept DoT queries
 - [ ] **DNSSEC validation** — validate/proxy DNSSEC responses

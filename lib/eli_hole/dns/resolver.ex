@@ -9,7 +9,7 @@ defmodule EliHole.DNS.Resolver do
   def resolve(query_packet) when is_binary(query_packet) do
     {domain, type} = extract_query_info(query_packet)
 
-    if Blocklist.blocked?(domain) and not Whitelist.allowed?(domain) do
+    if blocked_domain?(domain) do
       Logger.debug("Blocked: #{domain}/#{type}")
       {:blocked, nil, build_blocked_response(query_packet, type)}
     else
@@ -21,13 +21,68 @@ defmodule EliHole.DNS.Resolver do
           case Cache.lookup(domain, type) do
             {:hit, cached_response, original_upstream} ->
               Logger.debug("Cache hit: #{domain}/#{type}")
-              {:ok, "cache (#{original_upstream})", rewrite_id(query_packet, cached_response)}
+
+              finalize_response(
+                query_packet,
+                domain,
+                type,
+                "cache (#{original_upstream})",
+                rewrite_id(query_packet, cached_response)
+              )
 
             :miss ->
               resolve_upstream(query_packet, domain, type)
           end
       end
     end
+  end
+
+  defp blocked_domain?(domain) do
+    Blocklist.blocked?(domain) and not Whitelist.allowed?(domain)
+  end
+
+  # CNAME cloaking defense: a clean-looking domain may resolve through a CNAME
+  # chain whose target is on the blocklist. Inspect the answer section and block
+  # if any CNAME target is blocked (and not whitelisted).
+  defp finalize_response(query_packet, domain, type, source, response) do
+    case cname_cloaked_target(response) do
+      nil ->
+        {:ok, source, response}
+
+      target ->
+        Logger.debug("Blocked (CNAME cloaking): #{domain}/#{type} -> #{target}")
+        {:blocked, nil, build_blocked_response(query_packet, type)}
+    end
+  end
+
+  defp cache_and_finalize(query_packet, domain, type, upstream_str, response) do
+    case finalize_response(query_packet, domain, type, upstream_str, response) do
+      {:ok, _, _} = result ->
+        Cache.put(domain, type, response, upstream_str)
+        result
+
+      {:blocked, _, _} = blocked ->
+        blocked
+    end
+  end
+
+  defp cname_cloaked_target(response) do
+    case :inet_dns.decode(response) do
+      {:ok, record} ->
+        record
+        |> :inet_dns.msg(:anlist)
+        |> Enum.find_value(fn rr ->
+          if :inet_dns.rr(rr, :type) == :cname do
+            target = rr |> :inet_dns.rr(:data) |> to_string()
+            if blocked_domain?(target), do: target
+          end
+        end)
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
   end
 
   defp check_local_dns(query_packet, domain, type) do
@@ -50,15 +105,13 @@ defmodule EliHole.DNS.Resolver do
         upstream_str = Cache.format_upstream({ip, port})
         SpeedTracker.record(upstream, time_ms)
         Logger.debug("Resolved via #{upstream_str} (#{time_ms}ms, raced #{length(racers)})")
-        Cache.put(domain, type, response, upstream_str)
-        {:ok, upstream_str, response}
+        cache_and_finalize(query_packet, domain, type, upstream_str, response)
 
       {:error, _reason} ->
         case fallback_forward(query_packet, upstreams -- racers) do
           {:ok, {{ip, port}, response}} ->
             upstream_str = Cache.format_upstream({ip, port})
-            Cache.put(domain, type, response, upstream_str)
-            {:ok, upstream_str, response}
+            cache_and_finalize(query_packet, domain, type, upstream_str, response)
 
           {:error, reason} ->
             Logger.error("DNS resolution failed: #{inspect(reason)}")
