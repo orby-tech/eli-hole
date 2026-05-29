@@ -1,5 +1,5 @@
 defmodule EliHole.DNS.Resolver do
-  alias EliHole.DNS.{Blocklist, Cache, LocalDNS, SpeedTracker}
+  alias EliHole.DNS.{Blocklist, Cache, LocalDNS, SpeedTracker, Whitelist}
 
   require Logger
 
@@ -9,7 +9,7 @@ defmodule EliHole.DNS.Resolver do
   def resolve(query_packet) when is_binary(query_packet) do
     {domain, type} = extract_query_info(query_packet)
 
-    if Blocklist.blocked?(domain) do
+    if Blocklist.blocked?(domain) and not Whitelist.allowed?(domain) do
       Logger.debug("Blocked: #{domain}/#{type}")
       {:blocked, nil, build_blocked_response(query_packet, type)}
     else

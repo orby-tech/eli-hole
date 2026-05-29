@@ -43,6 +43,7 @@ defmodule EliHole.DNS.ClusterManager do
     :ets.new(@stats_table, [:set, :named_table, :public, read_concurrency: true])
 
     Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:blocklist")
+    Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:whitelist")
     Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:gravity")
     Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:local_dns")
     Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:adlists")
@@ -55,6 +56,10 @@ defmodule EliHole.DNS.ClusterManager do
 
   @impl true
   def handle_info(:blocklist_changed, state) do
+    {:noreply, schedule_push(state)}
+  end
+
+  def handle_info(:whitelist_changed, state) do
     {:noreply, schedule_push(state)}
   end
 

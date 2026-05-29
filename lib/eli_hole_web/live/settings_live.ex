@@ -1,7 +1,7 @@
 defmodule EliHoleWeb.SettingsLive do
   use EliHoleWeb, :live_view
 
-  alias EliHole.DNS.{Blocklist, Cache, Providers, SpeedTracker, Teleporter}
+  alias EliHole.DNS.{Blocklist, Cache, Providers, SpeedTracker, Teleporter, Whitelist}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -126,12 +126,15 @@ defmodule EliHoleWeb.SettingsLive do
     case result do
       {:ok, summary} ->
         Blocklist.flush_cache()
+        Whitelist.flush_cache()
         Cache.load_upstreams_from_db()
 
         gravity = Map.get(summary, :gravity, 0)
+        whitelist = Map.get(summary, :whitelist, 0)
 
         msg =
           "Imported #{summary.blocklist} blocklist entries, #{summary.providers} providers" <>
+            if(whitelist > 0, do: ", #{whitelist} whitelist entries", else: "") <>
             if(gravity > 0, do: ", #{gravity} adlists (run Gravity update to download)", else: "") <>
             if(Map.get(summary, :skipped, []) != [],
               do: ". Skipped: #{Enum.join(summary.skipped, ", ")}",

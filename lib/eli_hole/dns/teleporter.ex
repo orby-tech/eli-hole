@@ -2,7 +2,16 @@ defmodule EliHole.DNS.Teleporter do
   import Ecto.Query
 
   alias EliHole.Repo
-  alias EliHole.DNS.{Adlists, BlocklistEntry, LocalDNS, LocalRecord, Provider, Providers}
+
+  alias EliHole.DNS.{
+    Adlists,
+    BlocklistEntry,
+    LocalDNS,
+    LocalRecord,
+    Provider,
+    Providers,
+    WhitelistEntry
+  }
 
   require Logger
 
@@ -29,6 +38,27 @@ defmodule EliHole.DNS.Teleporter do
       |> Enum.map(&entry_to_map/1)
       |> Jason.encode!()
 
+    whitelist_exact =
+      WhitelistEntry
+      |> where(type: "exact")
+      |> Repo.all()
+      |> Enum.map(&entry_to_map/1)
+      |> Jason.encode!()
+
+    whitelist_wildcard =
+      WhitelistEntry
+      |> where(type: "wildcard")
+      |> Repo.all()
+      |> Enum.map(&entry_to_map/1)
+      |> Jason.encode!()
+
+    whitelist_regex =
+      WhitelistEntry
+      |> where(type: "regex")
+      |> Repo.all()
+      |> Enum.map(&entry_to_map/1)
+      |> Jason.encode!()
+
     providers =
       Provider
       |> order_by(:position)
@@ -47,6 +77,9 @@ defmodule EliHole.DNS.Teleporter do
       {"blocklist_exact.json", blocklist_exact},
       {"blocklist_wildcard.json", blocklist_wildcard},
       {"blocklist_regex.json", blocklist_regex},
+      {"whitelist_exact.json", whitelist_exact},
+      {"whitelist_wildcard.json", whitelist_wildcard},
+      {"whitelist_regex.json", whitelist_regex},
       {"providers.json", providers},
       {"local_dns.json", local_dns}
     ]
@@ -68,9 +101,10 @@ defmodule EliHole.DNS.Teleporter do
   """
   def import_pihole(tar_binary) when is_binary(tar_binary) do
     with {:ok, files} <- extract_tar(tar_binary) do
-      summary = %{blocklist: 0, providers: 0, gravity: 0, local_dns: 0, skipped: []}
+      summary = %{blocklist: 0, whitelist: 0, providers: 0, gravity: 0, local_dns: 0, skipped: []}
 
       summary = import_pihole_blacklist(files, summary)
+      summary = import_pihole_whitelist(files, summary)
       summary = import_pihole_providers(files, summary)
       summary = import_pihole_gravity(files, summary)
       summary = import_pihole_local_dns(files, summary)
@@ -86,11 +120,14 @@ defmodule EliHole.DNS.Teleporter do
   """
   def import_elihole(tar_binary) when is_binary(tar_binary) do
     with {:ok, files} <- extract_tar(tar_binary) do
-      summary = %{blocklist: 0, providers: 0, local_dns: 0}
+      summary = %{blocklist: 0, whitelist: 0, providers: 0, local_dns: 0}
 
       summary = import_elihole_blocklist(files, "blocklist_exact.json", "exact", summary)
       summary = import_elihole_blocklist(files, "blocklist_wildcard.json", "wildcard", summary)
       summary = import_elihole_blocklist(files, "blocklist_regex.json", "regex", summary)
+      summary = import_elihole_whitelist(files, "whitelist_exact.json", "exact", summary)
+      summary = import_elihole_whitelist(files, "whitelist_wildcard.json", "wildcard", summary)
+      summary = import_elihole_whitelist(files, "whitelist_regex.json", "regex", summary)
       summary = import_elihole_providers(files, summary)
       summary = import_elihole_local_dns(files, summary)
 
@@ -186,6 +223,54 @@ defmodule EliHole.DNS.Teleporter do
     %{summary | blocklist: count}
   end
 
+  defp import_pihole_whitelist(files, summary) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    exact_entries =
+      files
+      |> Map.get("whitelist.exact.json", "[]")
+      |> Jason.decode!()
+      |> Enum.filter(&(&1["enabled"] == 1))
+      |> Enum.map(fn item ->
+        %{
+          domain: String.downcase(item["domain"]),
+          type: "exact",
+          source: "pihole_import",
+          enabled: true,
+          comment: item["comment"],
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    regex_entries =
+      files
+      |> Map.get("whitelist.regex.json", "[]")
+      |> Jason.decode!()
+      |> Enum.filter(&(&1["enabled"] == 1))
+      |> Enum.map(fn item ->
+        %{
+          domain: item["domain"],
+          type: "regex",
+          source: "pihole_import",
+          enabled: true,
+          comment: item["comment"],
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    all_entries = exact_entries ++ regex_entries
+
+    {count, _} =
+      Repo.insert_all(WhitelistEntry, all_entries,
+        on_conflict: :nothing,
+        conflict_target: [:domain, :type]
+      )
+
+    %{summary | whitelist: count}
+  end
+
   defp import_pihole_providers(files, summary) do
     case Map.get(files, "setupVars.conf") do
       nil ->
@@ -256,8 +341,6 @@ defmodule EliHole.DNS.Teleporter do
   defp note_skipped(files, summary) do
     skipped =
       []
-      |> maybe_skip(files, "whitelist.exact.json", "whitelist (exact)")
-      |> maybe_skip(files, "whitelist.regex.json", "whitelist (regex)")
       |> maybe_skip(files, "client.json", "clients")
       |> maybe_skip(files, "group.json", "groups")
 
@@ -310,6 +393,39 @@ defmodule EliHole.DNS.Teleporter do
           )
 
         %{summary | blocklist: summary.blocklist + count}
+    end
+  end
+
+  defp import_elihole_whitelist(files, filename, type, summary) do
+    case Map.get(files, filename) do
+      nil ->
+        summary
+
+      content ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        entries =
+          content
+          |> Jason.decode!()
+          |> Enum.map(fn item ->
+            %{
+              domain: item["domain"],
+              type: type,
+              source: item["source"] || "elihole_import",
+              enabled: item["enabled"] != false,
+              comment: item["comment"],
+              inserted_at: now,
+              updated_at: now
+            }
+          end)
+
+        {count, _} =
+          Repo.insert_all(WhitelistEntry, entries,
+            on_conflict: :nothing,
+            conflict_target: [:domain, :type]
+          )
+
+        %{summary | whitelist: summary.whitelist + count}
     end
   end
 
@@ -385,7 +501,10 @@ defmodule EliHole.DNS.Teleporter do
     end
   end
 
-  defp entry_to_map(%BlocklistEntry{} = e) do
+  defp entry_to_map(%BlocklistEntry{} = e), do: do_entry_to_map(e)
+  defp entry_to_map(%WhitelistEntry{} = e), do: do_entry_to_map(e)
+
+  defp do_entry_to_map(e) do
     %{
       domain: e.domain,
       type: e.type,

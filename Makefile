@@ -14,7 +14,7 @@ dev.validate:
 	dig @127.0.0.1 -p 5354 glitchtip.orby-tech.space
 	dig @127.0.0.1 -p 5354 getnodejs.com
 	dig @127.0.0.1 -p 5354 banne4s.ero-advertising.com
-
+	dig @127.0.0.1 -p 5354 analytics.google.com
 
 server:
 	@$(load_env) && mix phx.server

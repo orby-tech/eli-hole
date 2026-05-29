@@ -27,6 +27,13 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Manual blocklist entry CRUD with search and pagination
 - Bulk import from hosts-file or domain-list formats
 
+### Whitelist
+- **Allowlist** — whitelisted domains always bypass the blocklist, even when a blocklist rule matches
+- Same matching modes as blocking: exact / wildcard / regex
+- ETS-backed lookup, evaluated before serving a blocked response
+- Admin UI at `/admin/whitelist` with CRUD, search, pagination, bulk domain import
+- Included in teleporter export/import and cluster sync
+
 ### Gravity (Adlist Sync)
 - Subscribe to remote adlist URLs (same format as Pi-hole)
 - Scheduled auto-update every 24 hours
@@ -49,16 +56,17 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 
 ### Teleporter (Import/Export)
 - Import Pi-hole teleporter backups (`.tar.gz`)
-  - Blacklists (exact + regex), DNS providers, adlists, local DNS (`custom.list`)
-  - Reports skipped items (whitelists, clients, groups)
-- Import EliHole's own backups (blocklist + providers + local DNS)
-- Export current config as `.tar.gz` (blocklist entries + providers + local DNS)
+  - Blacklists (exact + regex), whitelists (exact + regex), DNS providers, adlists, local DNS (`custom.list`)
+  - Reports skipped items (clients, groups)
+- Import EliHole's own backups (blocklist + whitelist + providers + local DNS)
+- Export current config as `.tar.gz` (blocklist + whitelist entries + providers + local DNS)
 - Auto-detect backup format (Pi-hole vs EliHole)
 
 ### Admin Panel (LiveView)
 - **Dashboard** (`/admin`) — total queries, resolved/blocked/failed counts, queries/sec, top domains, top clients, cache stats, fastest upstream
 - **Query Log** (`/admin/queries`) — real-time query stream via PubSub, per-query status/timing/upstream
 - **Blocklist** (`/admin/blocklist`) — search, add/edit/delete entries, toggle enable/disable, pagination
+- **Whitelist** (`/admin/whitelist`) — allowlist domains that bypass the blocklist; search, CRUD, bulk import, pagination
 - **Gravity** (`/admin/gravity`) — adlist management, add/remove URLs, trigger update, view status
 - **Local DNS** (`/admin/local-dns`) — custom domain records (A/AAAA/CNAME), bulk import, search
 - **Cluster** (`/admin/cluster`) — master: add/remove slave nodes, view stats, push config; slave: connection status; standalone: setup instructions
@@ -150,6 +158,7 @@ Client DNS query (UDP)
 | `EliHole.DNS.Resolver` | Race resolution + fallback forwarding |
 | `EliHole.DNS.Cache` | ETS response cache with TTL |
 | `EliHole.DNS.Blocklist` | ETS-backed domain blocking (exact/wildcard/regex) |
+| `EliHole.DNS.Whitelist` | ETS-backed allowlist; bypasses blocklist (exact/wildcard/regex) |
 | `EliHole.DNS.SpeedTracker` | Upstream latency tracking + weighted selection |
 | `EliHole.DNS.Gravity` | Scheduled adlist download and sync |
 | `EliHole.DNS.QueryLog` | ETS query history + PubSub broadcast |
@@ -239,7 +248,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 ## TODO
 
 ### Core DNS
-- [ ] **Whitelist** — allow specific domains to bypass blocklist
 - [ ] **CNAME deep inspection** — detect blocked domains hiding behind CNAMEs
 - [ ] **DNS-over-HTTPS (DoH)** — accept DoH queries
 - [ ] **DNS-over-TLS (DoT)** — accept DoT queries

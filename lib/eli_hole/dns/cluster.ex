@@ -11,7 +11,9 @@ defmodule EliHole.DNS.Cluster do
     Blocklist,
     LocalDNS,
     LocalRecord,
-    Cache
+    Cache,
+    Whitelist,
+    WhitelistEntry
   }
 
   require Logger
@@ -108,6 +110,12 @@ defmodule EliHole.DNS.Cluster do
         %{domain: e.domain, type: e.type, source: e.source, comment: e.comment}
       end)
 
+    whitelist_entries =
+      Whitelist.list_enabled()
+      |> Enum.map(fn e ->
+        %{domain: e.domain, type: e.type, source: e.source, comment: e.comment}
+      end)
+
     local_dns =
       LocalDNS.list_all_enabled()
       |> Enum.map(fn r ->
@@ -123,6 +131,7 @@ defmodule EliHole.DNS.Cluster do
     %{
       adlists: adlists,
       blocklist_entries: blocklist_entries,
+      whitelist_entries: whitelist_entries,
       local_dns: local_dns,
       upstreams: upstreams,
       cache_ttl: cache_ttl
@@ -133,6 +142,7 @@ defmodule EliHole.DNS.Cluster do
     Repo.transaction(fn ->
       import_adlists(config["adlists"] || [])
       import_blocklist_entries(config["blocklist_entries"] || [])
+      import_whitelist_entries(config["whitelist_entries"] || [])
       import_local_dns(config["local_dns"] || [])
     end)
 
@@ -192,6 +202,36 @@ defmodule EliHole.DNS.Cluster do
     end)
 
     Blocklist.flush_cache()
+  end
+
+  defp import_whitelist_entries(entries) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.delete_all(WhitelistEntry)
+
+    rows =
+      Enum.map(entries, fn e ->
+        %{
+          domain: e["domain"],
+          type: e["type"] || "exact",
+          source: e["source"] || "cluster_sync",
+          enabled: true,
+          comment: e["comment"],
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    rows
+    |> Enum.chunk_every(5000)
+    |> Enum.each(fn chunk ->
+      Repo.insert_all(WhitelistEntry, chunk,
+        on_conflict: :nothing,
+        conflict_target: [:domain, :type]
+      )
+    end)
+
+    Whitelist.flush_cache()
   end
 
   defp import_local_dns(records) do

@@ -48,6 +48,7 @@ defmodule EliHoleWeb.Router do
     live "/", DashboardLive
     live "/queries", QueryLogLive
     live "/blocklist", BlocklistLive
+    live "/whitelist", WhitelistLive
     live "/settings", SettingsLive
     live "/gravity", GravityLive
     live "/local-dns", LocalDNSLive

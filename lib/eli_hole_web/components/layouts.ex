@@ -66,6 +66,12 @@ defmodule EliHoleWeb.Layouts do
             active={@active_nav == :blocklist}
           />
           <.nav_item
+            href={~p"/admin/whitelist"}
+            icon="hero-shield-check"
+            label="Whitelist"
+            active={@active_nav == :whitelist}
+          />
+          <.nav_item
             href={~p"/admin/gravity"}
             icon="hero-cloud-arrow-down"
             label="Gravity"

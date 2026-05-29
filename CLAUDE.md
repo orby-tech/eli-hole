@@ -12,6 +12,7 @@ EliHole — DNS sinkhole on Elixir/Phoenix (Pi-hole analog). UDP DNS server + Li
 - `EliHole.DNS.Resolver` — upstream forwarding + cache integration
 - `EliHole.DNS.Cache` — ETS cache with configurable TTL
 - `EliHole.DNS.QueryLog` — ETS query history + PubSub broadcast
+- `EliHole.DNS.Whitelist` — ETS allowlist, `allowed?/1` bypasses blocklist
 - `EliHoleWeb.QueryLogLive` — real-time admin panel at `/admin/queries`
 
 ## Dev

@@ -14,6 +14,8 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole/dns/resolver.ex` — forwards queries to upstream DNS, integrates cache
 - `lib/eli_hole/dns/cache.ex` — ETS-based DNS response cache with configurable TTL
 - `lib/eli_hole/dns/query_log.ex` — ETS query history with PubSub broadcast
+- `lib/eli_hole/dns/whitelist.ex` — Whitelist GenServer: ETS allowlist (`allowed?/1` bypasses blocklist), CRUD, bulk import
+- `lib/eli_hole/dns/whitelist_entry.ex` — WhitelistEntry Ecto schema (exact/wildcard/regex)
 - `lib/eli_hole/dns/adlist.ex` — Adlist Ecto schema (subscription URLs)
 - `lib/eli_hole/dns/adlists.ex` — Adlist CRUD context
 - `lib/eli_hole/dns/gravity.ex` — Gravity GenServer: scheduled + manual adlist download/sync
@@ -25,6 +27,8 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole/dns/cluster_manager.ex` — Master GenServer: PubSub → debounced push to slaves
 - `lib/eli_hole/dns/cluster_sync.ex` — Slave GenServer: register + push stats to master
 - `lib/eli_hole_web/live/query_log_live.ex` — real-time admin panel at `/admin/queries`
+- `lib/eli_hole_web/live/blocklist_live.ex` — blocklist management at `/admin/blocklist`
+- `lib/eli_hole_web/live/whitelist_live.ex` — whitelist management at `/admin/whitelist`
 - `lib/eli_hole_web/live/gravity_live.ex` — gravity/adlist management at `/admin/gravity`
 - `lib/eli_hole_web/live/local_dns_live.ex` — local DNS record management at `/admin/local-dns`
 - `lib/eli_hole_web/live/cluster_live.ex` — cluster management at `/admin/cluster`
