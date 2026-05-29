@@ -111,34 +111,86 @@ defmodule EliHoleWeb.Layouts do
 
       <div class="flex-1 flex flex-col min-w-0">
         <header class="md:hidden flex items-center justify-between px-4 py-3 bg-base-200 border-b border-base-300">
-          <div class="flex items-center gap-2">
+          <.link navigate={~p"/admin"} class="flex items-center gap-2">
             <.icon name="hero-shield-check" class="size-6 text-primary" />
             <span class="font-bold">EliHole</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <.link navigate={~p"/admin"} class="btn btn-ghost btn-sm">
-              <.icon name="hero-chart-bar" class="size-4" />
-            </.link>
-            <.link navigate={~p"/admin/queries"} class="btn btn-ghost btn-sm">
-              <.icon name="hero-list-bullet" class="size-4" />
-            </.link>
-            <.link navigate={~p"/admin/blocklist"} class="btn btn-ghost btn-sm">
-              <.icon name="hero-shield-exclamation" class="size-4" />
-            </.link>
-            <.link navigate={~p"/admin/gravity"} class="btn btn-ghost btn-sm">
-              <.icon name="hero-cloud-arrow-down" class="size-4" />
-            </.link>
-            <.link navigate={~p"/admin/local-dns"} class="btn btn-ghost btn-sm">
-              <.icon name="hero-map-pin" class="size-4" />
-            </.link>
-            <.link navigate={~p"/admin/cluster"} class="btn btn-ghost btn-sm">
-              <.icon name="hero-server-stack" class="size-4" />
-            </.link>
-            <.link navigate={~p"/admin/settings"} class="btn btn-ghost btn-sm">
-              <.icon name="hero-cog-6-tooth" class="size-4" />
-            </.link>
-          </div>
+          </.link>
+
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-square"
+            aria-label="Toggle navigation menu"
+            aria-controls="mobile-nav"
+            phx-click={JS.toggle(to: "#mobile-nav", display: "flex")}
+          >
+            <.icon name="hero-bars-3" class="size-6" />
+          </button>
         </header>
+
+        <nav
+          id="mobile-nav"
+          class="md:hidden hidden flex-col p-3 space-y-1 bg-base-200 border-b border-base-300"
+        >
+          <.nav_item
+            href={~p"/admin"}
+            icon="hero-chart-bar"
+            label="Dashboard"
+            active={@active_nav == :dashboard}
+          />
+          <.nav_item
+            href={~p"/admin/queries"}
+            icon="hero-list-bullet"
+            label="Query Log"
+            active={@active_nav == :queries}
+          />
+          <.nav_item
+            href={~p"/admin/blocklist"}
+            icon="hero-shield-exclamation"
+            label="Blocklist"
+            active={@active_nav == :blocklist}
+          />
+          <.nav_item
+            href={~p"/admin/whitelist"}
+            icon="hero-shield-check"
+            label="Whitelist"
+            active={@active_nav == :whitelist}
+          />
+          <.nav_item
+            href={~p"/admin/gravity"}
+            icon="hero-cloud-arrow-down"
+            label="Gravity"
+            active={@active_nav == :gravity}
+          />
+          <.nav_item
+            href={~p"/admin/local-dns"}
+            icon="hero-map-pin"
+            label="Local DNS"
+            active={@active_nav == :local_dns}
+          />
+          <.nav_item
+            href={~p"/admin/cluster"}
+            icon="hero-server-stack"
+            label="Cluster"
+            active={@active_nav == :cluster}
+          />
+          <.nav_item
+            href={~p"/admin/settings"}
+            icon="hero-cog-6-tooth"
+            label="Settings"
+            active={@active_nav == :settings}
+          />
+
+          <div class="pt-3 mt-2 border-t border-base-300 space-y-3">
+            <.theme_toggle />
+            <.link
+              href={~p"/logout"}
+              method="delete"
+              class="flex items-center gap-2 text-sm opacity-60 hover:opacity-100 transition-opacity px-2"
+            >
+              <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" /> Logout
+            </.link>
+          </div>
+        </nav>
 
         <main class="flex-1 p-4 sm:p-6 overflow-auto">
           <div class="mx-auto max-w-6xl">

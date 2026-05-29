@@ -271,6 +271,5 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 - [ ] **CI pipeline** — GitHub Actions / Forgejo Actions
 
 ### Polish
-- [ ] **Mobile responsive nav** — hamburger menu for small screens
 - [ ] **Notification on gravity failure** — alert when adlist download fails
 - [ ] **API for external integrations** — REST/JSON API for blocklist/stats
