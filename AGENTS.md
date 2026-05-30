@@ -26,6 +26,20 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole/dns/cluster_node.ex` — ClusterNode Ecto schema
 - `lib/eli_hole/dns/cluster_manager.ex` — Master GenServer: PubSub → debounced push to slaves
 - `lib/eli_hole/dns/cluster_sync.ex` — Slave GenServer: register + push stats to master
+- `lib/eli_hole/dnssec/` — **DNSSEC validating resolver (in progress, see `docs/DNSSEC.md`)**. Loops 1–2 done = full validation engine + chain-of-trust walk:
+  - `wire.ex` — DNS wire parser: RRs with raw RDATA, name decompression (pointer-loop guarded), AD/CD bits, EDNS0 DO-bit query builder
+  - `rr.ex` — RDATA parsers (DNSKEY/RRSIG/DS/NSEC/NSEC3), key tag (RFC 4034 App B), DNSKEY → `:crypto` key
+  - `canonical.ex` — canonical RR form, RRset sort, RRSIG signing input (RFC 4034 §3.1.8.1/§6, RFC 6840 §5.1, wildcard per RFC 4035 §5.3.2)
+  - `crypto.ex` — `verify_rrsig` (RSA/ECDSA-DER-wrapped/EdDSA) + `verify_ds`
+  - `trust_anchor.ex` — hardcoded root DS (KSK-2017 + KSK-2024)
+  - `client.ex` — GenServer: DNSKEY/DS fetch with DO bit (UDP + TCP fallback) + ETS cache; in the supervision tree
+  - `validator.ex` — chain-of-trust walk root→signer, returns `{:secure, signer} | {:insecure, reason} | {:bogus, reason}`; fetcher + clock injectable for offline tests; tries all RRSIGs (multi-key), binds RRset/RRSIG to the queried owner name
+  - `config.ex` — GenServer: `enforce` toggle (ETS-cached, persisted to `dns_settings`, PubSub `dnssec:config`); in the supervision tree
+  - `denial.ex` — NSEC/NSEC3 denial-of-existence: NSEC3 iterated-SHA1 hash (RFC 5155), base32hex, match/cover/opt-out; NSEC canonical name ordering (RFC 4034 §6.1), match/cover/type-absent. Used for two things: (a) `prove_ds_absence` — empty DS needs a signed denial → `:insecure` if proven, `:bogus` (stripped-DS downgrade) if not; (b) `prove_denial` — authenticated NXDOMAIN/NODATA for the answer → `:secure` if a signed NSEC/NSEC3 proves absence, else `:insecure` (never `:bogus`).
+  - Live demo: `make dnssec.demo`.
+  - **Integrated (Loop 3):** `Resolver.dnssec_status/3` classifies each resolved query; `Server` records the verdict in `QueryLog` (off the client's critical path); `QueryLogLive` shows a DNSSEC badge (secure/insecure/bogus). Client queries usually lack the DO bit, so the status is computed via a separate DO lookup through `Client` + `Validator`; failures degrade to `nil` (DNS never breaks).
+  - **Enforcement (Loop 4):** `EliHole.DNSSEC.Config` — `enforce` toggle (ETS+DB+PubSub, default off) in the supervision tree, toggled at `/admin/settings`. When on, `Server` validates BEFORE replying and `Resolver.enforce_response/4` returns SERVFAIL on `:bogus` / sets the AD bit on `:secure`.
+  - **Downgrade defense (Loop 5):** an empty DS RRset now requires a signed NSEC/NSEC3 absence proof (`Validator.prove_ds_absence` + `Denial`) — proven → `:insecure`, unproven → `:bogus`. *Pending (optional):* secure NXDOMAIN/NODATA proof for the answer itself, RFC 9276 iteration limits, dashboard counters.
 - `lib/eli_hole_web/live/query_log_live.ex` — real-time admin panel at `/admin/queries`
 - `lib/eli_hole_web/live/blocklist_live.ex` — blocklist management at `/admin/blocklist`
 - `lib/eli_hole_web/live/whitelist_live.ex` — whitelist management at `/admin/whitelist`

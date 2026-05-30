@@ -71,7 +71,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - **Gravity** (`/admin/gravity`) — adlist management, add/remove URLs, trigger update, view status
 - **Local DNS** (`/admin/local-dns`) — custom domain records (A/AAAA/CNAME), bulk import, search
 - **Cluster** (`/admin/cluster`) — master: add/remove slave nodes, view stats, push config; slave: connection status; standalone: setup instructions
-- **Settings** (`/admin/settings`) — upstream DNS providers (presets: Google/Cloudflare/Quad9 + custom), cache TTL, flush cache, upstream speed table, teleporter import/export
+- **Settings** (`/admin/settings`) — DNSSEC enforcement toggle, upstream DNS providers (presets: Google/Cloudflare/Quad9 + custom), cache TTL, flush cache, upstream speed table, teleporter import/export
 
 ### Auth
 - Admin user via `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars (min 8 chars for password)
@@ -147,8 +147,10 @@ Client DNS query (UDP)
   DNS.SpeedTracker (weighted upstream selection)
         |
   DNS.QueryLog (ETS, PubSub broadcast)
+        |  (off critical path) DNSSEC.Validator — chain-of-trust from root
+        |                      tags each query secure / insecure / bogus
         |
-  LiveView admin panel (real-time updates)
+  LiveView admin panel (real-time updates, DNSSEC column)
 ```
 
 ### Key Modules
@@ -163,6 +165,10 @@ Client DNS query (UDP)
 | `EliHole.DNS.SpeedTracker` | Upstream latency tracking + weighted selection |
 | `EliHole.DNS.Gravity` | Scheduled adlist download and sync |
 | `EliHole.DNS.QueryLog` | ETS query history + PubSub broadcast |
+| `EliHole.DNSSEC.Validator` | Chain-of-trust validation root→name (secure/insecure/bogus) |
+| `EliHole.DNSSEC.Client` | DNSKEY/DS fetch (DO bit, UDP+TCP) + ETS cache |
+| `EliHole.DNSSEC.Config` | DNSSEC enforcement toggle (ETS + DB-persisted) |
+| `EliHole.DNSSEC.Denial` | NSEC/NSEC3 denial-of-existence (anti-downgrade) |
 | `EliHole.DNS.LocalDNS` | Custom local domain records (ETS GenServer) |
 | `EliHole.DNS.Teleporter` | Pi-hole/EliHole backup import/export |
 | `EliHole.DNS.Providers` | Upstream DNS provider CRUD |
@@ -251,7 +257,7 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 ### Core DNS
 - [ ] **DNS-over-HTTPS (DoH)** — accept DoH queries
 - [ ] **DNS-over-TLS (DoT)** — accept DoT queries
-- [ ] **DNSSEC validation** — validate/proxy DNSSEC responses
+- [x] **DNSSEC validation** — full chain-of-trust validation from the ICANN root, shown per query in the admin log (secure/insecure/bogus); see [`docs/DNSSEC.md`](docs/DNSSEC.md). _Remaining: SERVFAIL enforcement on bogus, NSEC/NSEC3 denial-of-existence._
 - [ ] **Rate limiting** — per-client query throttling
 - [ ] **Conditional forwarding** — route specific domains to specific upstreams
 
@@ -262,6 +268,8 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 - [ ] **Client groups** — group clients with different blocklist rules
 - [ ] **Query log persistence** — store history in Postgres (currently ETS, lost on restart)
 - [ ] **Long-term statistics** — daily/weekly/monthly aggregates
+- [ ] **Daily stats** - replace 10000 query ETS log with daily aggregates for top domains/clients, total queries, blocked queries, etc.
+- [ ] **Redirect pi-hole admin URLs** — redirect `/#/*` to EliHole's admin paths
 
 ### Operations
 - [ ] **Health check endpoint** — `GET /api/health`

@@ -40,6 +40,7 @@ defmodule EliHoleWeb.DashboardLive do
     socket
     |> assign(:stats, stats)
     |> assign(:breakdown, breakdown)
+    |> assign(:dnssec, QueryLog.dnssec_breakdown())
     |> assign(:cache_stats, cache_stats)
     |> assign(:top_domains, QueryLog.top_domains(10))
     |> assign(:top_clients, QueryLog.top_clients(10))
@@ -74,6 +75,21 @@ defmodule EliHoleWeb.DashboardLive do
           <div class="bg-base-200 rounded-xl p-4">
             <div class="text-sm opacity-60">Queries/sec</div>
             <div class="text-3xl font-bold">{@qps}</div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4">
+          <div class="bg-base-200 rounded-xl p-4">
+            <div class="text-sm opacity-60">DNSSEC Secure</div>
+            <div class="text-3xl font-bold text-success">{@dnssec.secure}</div>
+          </div>
+          <div class="bg-base-200 rounded-xl p-4">
+            <div class="text-sm opacity-60">DNSSEC Insecure</div>
+            <div class="text-3xl font-bold opacity-70">{@dnssec.insecure}</div>
+          </div>
+          <div class="bg-base-200 rounded-xl p-4">
+            <div class="text-sm opacity-60">DNSSEC Bogus</div>
+            <div class="text-3xl font-bold text-error">{@dnssec.bogus}</div>
           </div>
         </div>
 

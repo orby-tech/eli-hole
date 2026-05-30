@@ -15,6 +15,11 @@ dev.validate:
 	dig @127.0.0.1 -p 5354 getnodejs.com
 	dig @127.0.0.1 -p 5354 banne4s.ero-advertising.com
 	dig @127.0.0.1 -p 5354 analytics.google.com
+	# DNSSEC-signed → expect "secure" in the admin DNSSEC column
+	dig @127.0.0.1 -p 5354 cloudflare.com
+	dig @127.0.0.1 -p 5354 ietf.org
+	dig @127.0.0.1 -p 5354 nlnetlabs.nl
+	dig @127.0.0.1 -p 5354 internetsociety.org
 
 server:
 	@$(load_env) && mix phx.server
@@ -81,3 +86,6 @@ lint:
 
 dialyzer:
 	@$(load_env) && mix dialyzer
+
+dnssec.demo:
+	@$(load_env) && mix run priv/dnssec/demo.exs

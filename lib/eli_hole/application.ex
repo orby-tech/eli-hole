@@ -26,6 +26,8 @@ defmodule EliHole.Application do
         {DNSCluster, query: Application.get_env(:eli_hole, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: EliHole.PubSub},
         EliHole.DNS.Cache,
+        EliHole.DNSSEC.Client,
+        EliHole.DNSSEC.Config,
         EliHole.DNS.Blocklist,
         EliHole.DNS.Whitelist,
         EliHole.DNS.LocalDNS,

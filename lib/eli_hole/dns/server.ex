@@ -2,6 +2,7 @@ defmodule EliHole.DNS.Server do
   use GenServer
 
   alias EliHole.DNS.{Resolver, QueryLog}
+  alias EliHole.DNSSEC.Config
 
   require Logger
 
@@ -29,11 +30,24 @@ defmodule EliHole.DNS.Server do
     Task.start(fn ->
       client = "#{:inet.ntoa(client_ip)}:#{client_port}"
 
-      {time_us, {status, upstream, response, domain, qtype}} =
+      enforce = Config.enforce?()
+
+      {time_us, {status, upstream, response, domain, qtype, dnssec}} =
         :timer.tc(fn ->
           {status, upstream, response} = Resolver.resolve(packet)
           {domain, qtype} = Resolver.extract_query_info(packet)
-          {status, upstream, response, domain, qtype}
+
+          # When enforcing, validate BEFORE replying so a bogus answer can be withheld
+          # (SERVFAIL) and a secure one gets the AD bit. Otherwise classification is done
+          # off the critical path below, after the client already has its answer.
+          if enforce do
+            d = Resolver.dnssec_status(status, domain, qtype)
+
+            {status, upstream, Resolver.enforce_response(response, status, d, packet), domain,
+             qtype, d}
+          else
+            {status, upstream, response, domain, qtype, nil}
+          end
         end)
 
       :gen_udp.send(socket, client_ip, client_port, response)
@@ -43,6 +57,8 @@ defmodule EliHole.DNS.Server do
         "DNS #{domain}/#{qtype} from #{client} → #{upstream || "fail"} #{duration_ms}ms"
       )
 
+      dnssec = if enforce, do: dnssec, else: Resolver.dnssec_status(status, domain, qtype)
+
       QueryLog.log(%{
         id: System.unique_integer([:positive]),
         time: Calendar.strftime(DateTime.utc_now(), "%H:%M:%S"),
@@ -51,7 +67,8 @@ defmodule EliHole.DNS.Server do
         type: qtype,
         upstream: upstream,
         duration_ms: duration_ms,
-        status: status
+        status: status,
+        dnssec: dnssec
       })
     end)
 

@@ -67,6 +67,20 @@ defmodule EliHole.DNS.QueryLog do
     end)
   end
 
+  @doc "Counts of DNSSEC validation verdicts across logged queries (entries without a verdict ignored)."
+  def dnssec_breakdown do
+    freqs =
+      :ets.tab2list(@table)
+      |> Enum.map(fn {_ts, entry} -> Map.get(entry, :dnssec) end)
+      |> Enum.frequencies()
+
+    %{
+      secure: Map.get(freqs, :secure, 0),
+      insecure: Map.get(freqs, :insecure, 0),
+      bogus: Map.get(freqs, :bogus, 0)
+    }
+  end
+
   def queries_per_minute(minutes \\ 60) do
     :ets.tab2list(@table)
     |> Enum.map(fn {_ts, entry} -> String.slice(entry.time, 0, 5) end)

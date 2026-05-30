@@ -55,6 +55,7 @@ defmodule EliHoleWeb.QueryLogLive do
                 <th>Upstream</th>
                 <th>Duration</th>
                 <th>Status</th>
+                <th>DNSSEC</th>
               </tr>
             </thead>
             <tbody id="queries" phx-update="stream">
@@ -76,6 +77,23 @@ defmodule EliHoleWeb.QueryLogLive do
                   ]}>
                     {q.status}
                   </span>
+                </td>
+                <td>
+                  <span
+                    :if={q[:dnssec]}
+                    class={[
+                      "badge badge-sm",
+                      cond do
+                        q[:dnssec] == :secure -> "badge-success"
+                        q[:dnssec] == :insecure -> "badge-ghost"
+                        true -> "badge-error"
+                      end
+                    ]}
+                    title="DNSSEC validation result"
+                  >
+                    {q[:dnssec]}
+                  </span>
+                  <span :if={is_nil(q[:dnssec])} class="text-base-content/30 text-xs">—</span>
                 </td>
               </tr>
             </tbody>

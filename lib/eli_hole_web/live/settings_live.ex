@@ -2,11 +2,13 @@ defmodule EliHoleWeb.SettingsLive do
   use EliHoleWeb, :live_view
 
   alias EliHole.DNS.{Blocklist, Cache, Providers, SpeedTracker, Teleporter, Whitelist}
+  alias EliHole.DNSSEC.Config, as: DnssecConfig
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:cache_settings")
+      Phoenix.PubSub.subscribe(EliHole.PubSub, "dnssec:config")
     end
 
     cache_stats = Cache.stats()
@@ -24,12 +26,18 @@ defmodule EliHoleWeb.SettingsLive do
      |> assign(:custom_upstream_input, "")
      |> assign(:presets, Cache.presets())
      |> assign(:speed_stats, SpeedTracker.stats())
+     |> assign(:dnssec_enforce, DnssecConfig.enforce?())
      |> assign(:import_result, nil)
      |> allow_upload(:teleporter_file,
        accept: ~w(.gz),
        max_entries: 1,
        max_file_size: 50_000_000
      )}
+  end
+
+  @impl true
+  def handle_info({:enforce_changed, value}, socket) do
+    {:noreply, assign(socket, :dnssec_enforce, value)}
   end
 
   @impl true
@@ -51,6 +59,12 @@ defmodule EliHoleWeb.SettingsLive do
      socket
      |> assign(:upstreams, upstreams)
      |> assign(:active_presets, detect_active_presets(upstreams))}
+  end
+
+  @impl true
+  def handle_event("toggle_dnssec_enforce", _, socket) do
+    DnssecConfig.set_enforce(!socket.assigns.dnssec_enforce)
+    {:noreply, socket}
   end
 
   @impl true
@@ -189,6 +203,30 @@ defmodule EliHoleWeb.SettingsLive do
     <Layouts.app flash={@flash} active_nav={@active_nav}>
       <div class="space-y-6">
         <h1 class="text-2xl font-bold">Settings</h1>
+
+        <div class="bg-base-200 rounded-xl p-4 space-y-2">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-lg font-semibold">DNSSEC enforcement</h2>
+              <p class="text-sm opacity-60">
+                When on, bogus (forged/invalid) answers are replaced with SERVFAIL and
+                validated answers get the AD bit. When off, queries are only classified
+                (secure / insecure / bogus) in the query log without affecting resolution.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              class="toggle toggle-primary"
+              checked={@dnssec_enforce}
+              phx-click="toggle_dnssec_enforce"
+              aria-label="Toggle DNSSEC enforcement"
+            />
+          </div>
+          <p :if={@dnssec_enforce} class="text-xs text-warning">
+            Enforcement adds upstream lookups to the query path; if validation is wrong a
+            domain can be SERVFAIL'd. Unsigned domains (insecure) are unaffected.
+          </p>
+        </div>
 
         <div class="bg-base-200 rounded-xl p-4 space-y-3">
           <h2 class="text-lg font-semibold">DNS Providers</h2>

@@ -1,10 +1,17 @@
 defmodule EliHole.DNS.Resolver do
+  import Bitwise
+
   alias EliHole.DNS.{Blocklist, Cache, LocalDNS, SpeedTracker, Whitelist}
+  alias EliHole.DNSSEC.{Client, Validator}
 
   require Logger
 
   @upstream_timeout 5_000
   @race_count 2
+
+  # Query-type names (as produced by extract_query_info/1) → numeric RR type, for the
+  # subset worth DNSSEC-validating. Unlisted types are skipped (status nil).
+  @dnssec_types %{"A" => 1, "AAAA" => 28, "CNAME" => 5, "MX" => 15, "TXT" => 16, "NS" => 2}
 
   def resolve(query_packet) when is_binary(query_packet) do
     {domain, type} = extract_query_info(query_packet)
@@ -222,6 +229,47 @@ defmodule EliHole.DNS.Resolver do
         {"?", "?"}
     end
   end
+
+  @doc """
+  DNSSEC validation status for a resolved query, for display in the query log.
+
+  Returns `:secure | :insecure | :bogus | nil`. Only `:ok` (successfully resolved
+  upstream) results are validated; blocked/local/error answers return `nil`. The
+  client's forwarded query usually lacks the DO bit, so this issues its own
+  DO-enabled lookup via `Client` (cached) and runs the full chain-of-trust
+  `Validator`. Best-effort: any failure yields `nil` rather than disrupting DNS.
+  This runs off the client's critical path (the answer is already sent).
+  """
+  def dnssec_status(:ok, domain, type) do
+    with rr_type when is_integer(rr_type) <- Map.get(@dnssec_types, type),
+         {:ok, answer} <- Client.query(domain, rr_type) do
+      Validator.validate(domain, rr_type, answer) |> elem(0)
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  def dnssec_status(_status, _domain, _type), do: nil
+
+  @doc """
+  Apply a DNSSEC verdict to the response when enforcement is enabled:
+
+    * `:bogus` resolved answer → replace with SERVFAIL (the forged/invalid answer is
+      withheld from the client).
+    * `:secure` resolved answer → set the AD (Authenticated Data) header bit.
+    * anything else → response unchanged.
+  """
+  def enforce_response(_response, :ok, :bogus, query_packet), do: build_servfail(query_packet)
+  def enforce_response(response, :ok, :secure, _query_packet), do: set_ad_bit(response)
+  def enforce_response(response, _status, _dnssec, _query_packet), do: response
+
+  # AD is bit 5 of the second flags octet (RA Z AD CD RCODE) → mask 0x20.
+  defp set_ad_bit(<<id::16, flags1, flags2, rest::binary>>),
+    do: <<id::16, flags1, flags2 ||| 0x20, rest::binary>>
+
+  defp set_ad_bit(other), do: other
 
   defp rewrite_id(query_packet, cached_response) do
     <<query_id::16, _::binary>> = query_packet

@@ -11,6 +11,20 @@ defmodule EliHole.DNS.QueryLogTest do
     :ok
   end
 
+  describe "dnssec_breakdown/0" do
+    test "counts secure/insecure/bogus verdicts and ignores entries without a verdict" do
+      for {d, v} <- [{"a", :secure}, {"b", :secure}, {"c", :insecure}, {"d", :bogus}] do
+        QueryLog.log(%{domain: d, type: "A", status: :ok, upstream: "x", dnssec: v})
+      end
+
+      # an entry with no dnssec key must not be counted
+      QueryLog.log(%{domain: "blocked", type: "A", status: :blocked, upstream: nil})
+      _ = :sys.get_state(QueryLog)
+
+      assert QueryLog.dnssec_breakdown() == %{secure: 2, insecure: 1, bogus: 1}
+    end
+  end
+
   describe "log/1 and recent/1" do
     test "logged entry appears in recent results" do
       entry = %{domain: "example.com", type: "A", status: :ok, upstream: "8.8.8.8:53"}
