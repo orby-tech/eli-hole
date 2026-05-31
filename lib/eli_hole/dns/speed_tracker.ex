@@ -21,7 +21,7 @@ defmodule EliHole.DNS.SpeedTracker do
 
     case length(ranked) do
       0 -> []
-      n when n <= count -> ranked
+      n when n <= count -> Enum.map(ranked, fn {upstream, _avg} -> upstream end)
       _ -> weighted_pick(ranked, count)
     end
   end

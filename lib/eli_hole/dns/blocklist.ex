@@ -64,6 +64,16 @@ defmodule EliHole.DNS.Blocklist do
     |> Repo.all()
   end
 
+  @doc """
+  Add a single exact-match domain to the blocklist.
+
+  Creates the entry and synchronously reloads the ETS cache, so `blocked?/1`
+  reflects it immediately. Returns `{:ok, entry}` or an Ecto error changeset.
+  """
+  def add_exact(domain) when is_binary(domain) do
+    create_entry(%{domain: String.downcase(domain), type: "exact", source: "manual"})
+  end
+
   def get_entry!(id), do: Repo.get!(BlocklistEntry, id)
 
   def create_entry(attrs) do

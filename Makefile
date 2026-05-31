@@ -5,7 +5,7 @@ define load_env
 	set -a && [ -f .env ] && source .env && set +a
 endef
 
-.PHONY: setup server iex deps db.create db.migrate db.rollback db.reset db.seed test test.watch routes clean gen.secret gen.migration gen.context gen.live precommit lint dialyzer
+.PHONY: setup server iex deps db.create db.migrate db.rollback db.reset db.seed test test.watch routes clean gen.secret gen.migration gen.context gen.live precommit lint dialyzer dev.validate dev.validate.encrypted
 
 setup: deps hooks.install db.create db.migrate
 
@@ -20,6 +20,11 @@ dev.validate:
 	dig @127.0.0.1 -p 5354 ietf.org
 	dig @127.0.0.1 -p 5354 nlnetlabs.nl
 	dig @127.0.0.1 -p 5354 internetsociety.org
+
+# Smoke-test the encrypted transports (DoH over PHX_PORT, DoT over DOT_PORT).
+# DoT requires DOT_CERT_PATH/DOT_KEY_PATH set + server restarted; needs kdig.
+dev.validate.encrypted:
+	@$(load_env) && ./scripts/validate-encrypted-dns.sh
 
 server:
 	@$(load_env) && mix phx.server

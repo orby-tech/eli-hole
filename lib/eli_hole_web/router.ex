@@ -27,6 +27,13 @@ defmodule EliHoleWeb.Router do
     plug EliHoleWeb.Plugs.ClusterAuth
   end
 
+  # DNS-over-HTTPS (RFC 8484). No browser/session plugs: the body is raw
+  # `application/dns-message`, read directly in the controller.
+  scope "/", EliHoleWeb do
+    get "/dns-query", DohController, :query
+    post "/dns-query", DohController, :query
+  end
+
   scope "/", EliHoleWeb do
     pipe_through :browser
 

@@ -19,6 +19,10 @@ config :eli_hole, EliHoleWeb.Endpoint,
   secret_key_base: "f+UZBxbpI8XrKC6Jw+FOR/ZS1217D3/Lf4o2KiRv7gY93GObESx6BEfZvrbughQd",
   server: false
 
+# The DoT listener binds a fixed TLS port; the suite starts its own ephemeral
+# listener in dot_server_test, so keep the supervision-tree one out of test.
+config :eli_hole, start_dot_server?: false
+
 # In test we don't send emails
 config :eli_hole, EliHole.Mailer, adapter: Swoosh.Adapters.Test
 

@@ -32,6 +32,9 @@ cluster_role =
 
 config :eli_hole,
   dns_port: String.to_integer(System.get_env("DNS_PORT") || "5354"),
+  dot_port: String.to_integer(System.get_env("DOT_PORT") || "853"),
+  dot_certfile: System.get_env("DOT_CERT_PATH"),
+  dot_keyfile: System.get_env("DOT_KEY_PATH"),
   admin_username: System.get_env("ADMIN_USERNAME"),
   admin_password: System.get_env("ADMIN_PASSWORD"),
   cluster_role: cluster_role,

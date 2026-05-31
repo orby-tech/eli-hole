@@ -6,11 +6,14 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 
 ### DNS Engine
 - UDP DNS server with upstream forwarding via `:gen_udp`
+- **DNS-over-HTTPS (DoH, RFC 8484)** — `GET /dns-query?dns=<base64url>` and `POST` (`application/dns-message`); TLS terminated by the endpoint or a reverse proxy
+- **DNS-over-TLS (DoT, RFC 7858)** — TLS listener (default port 853), length-prefixed framing, keep-alive with idle timeout; auto-disabled until a cert/key is configured
 - **Race resolution** — queries 2 upstreams in parallel, returns fastest response
 - Fallback to remaining upstreams if racers fail
 - DNS response caching with configurable TTL (ETS, default 300s)
 - Blocked domains return `0.0.0.0` for A records, NXDOMAIN for others
 - Upstream speed tracking with weighted random selection
+- All transports (UDP / DoT / DoH) share one `DNS.Handler` — blocking, caching, and DNSSEC behave identically; each query is tagged with its transport in the log
 
 ### Local DNS
 - Custom domain-to-IP mappings (A, AAAA, CNAME records)
@@ -105,6 +108,24 @@ dig @127.0.0.1 -p 5354 google.com
 dig @127.0.0.1 -p 5354 google.com
 ```
 
+### Encrypted DNS (DoH / DoT)
+
+DoH works out of the box at `/dns-query` (TLS terminated by the endpoint or a
+reverse proxy). DoT stays disabled until a certificate is configured — generate a
+self-signed pair for local testing, then set the paths in `.env`:
+
+```bash
+mix phx.gen.cert                       # writes priv/cert/selfsigned{,_key}.pem
+# .env: DOT_PORT=8853 (use >1024 to avoid root), DOT_CERT_PATH=..., DOT_KEY_PATH=...
+make server                            # log shows "DNS-over-TLS listening on TCP port 8853"
+
+make dev.validate.encrypted            # smoke-test DoH (GET/POST) + DoT against the running server
+```
+
+> Self-signed certs work for `dig`/`kdig` and `systemd-resolved` (opportunistic),
+> but Android Private DNS / iOS reject them. For those, use a publicly-trusted
+> cert (e.g. Let's Encrypt via DNS-01).
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -119,6 +140,9 @@ dig @127.0.0.1 -p 5354 google.com
 | `ADMIN_USERNAME` | (none) | Admin username (created on startup) |
 | `ADMIN_PASSWORD` | (none) | Admin password (min 8 characters) |
 | `FORCE_SSL` | `false` | Set `true` behind TLS-terminating reverse proxy |
+| `DOT_PORT` | `853` | DNS-over-TLS listener port (use >1024 to run without root) |
+| `DOT_CERT_PATH` | (none) | TLS certificate (PEM) — DoT disabled until set + present |
+| `DOT_KEY_PATH` | (none) | TLS private key (PEM) — DoT disabled until set + present |
 | `SENTRY_DSN` | (none) | GlitchTip/Sentry DSN for error tracking |
 | `INSTANCE_ROLE` | `standalone` | Cluster role: `master`, `slave`, or `standalone` |
 | `CLUSTER_API_KEY` | (none) | Shared secret for cluster API auth |
@@ -255,8 +279,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 ## TODO
 
 ### Core DNS
-- [ ] **DNS-over-HTTPS (DoH)** — accept DoH queries
-- [ ] **DNS-over-TLS (DoT)** — accept DoT queries
 - [x] **DNSSEC validation** — full chain-of-trust validation from the ICANN root, shown per query in the admin log (secure/insecure/bogus); see [`docs/DNSSEC.md`](docs/DNSSEC.md). _Remaining: SERVFAIL enforcement on bogus, NSEC/NSEC3 denial-of-existence._
 - [ ] **Rate limiting** — per-client query throttling
 - [ ] **Conditional forwarding** — route specific domains to specific upstreams

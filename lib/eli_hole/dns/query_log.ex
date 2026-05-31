@@ -12,6 +12,16 @@ defmodule EliHole.DNS.QueryLog do
     GenServer.cast(__MODULE__, {:log, entry})
   end
 
+  @doc """
+  Subscribe the calling process to live query events.
+
+  Each logged query is broadcast as `{:new_query, entry}` on the `dns:queries`
+  PubSub topic — the admin LiveView and tests consume it for real-time updates.
+  """
+  def subscribe do
+    Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:queries")
+  end
+
   def recent(limit \\ 100) do
     @table
     |> :ets.tab2list()

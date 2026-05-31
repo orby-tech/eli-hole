@@ -11,7 +11,11 @@ config :eli_hole,
   ecto_repos: [EliHole.Repo],
   generators: [timestamp_type: :utc_datetime],
   dns_port: 5354,
-  dns_upstreams: [{{8, 8, 8, 8}, 53}, {{8, 8, 4, 4}, 53}]
+  dns_upstreams: [{{8, 8, 8, 8}, 53}, {{8, 8, 4, 4}, 53}],
+  # DNS-over-TLS (RFC 7858). Disabled until a cert + key are configured.
+  dot_port: 853,
+  dot_certfile: nil,
+  dot_keyfile: nil
 
 # Configure the endpoint
 config :eli_hole, EliHoleWeb.Endpoint,

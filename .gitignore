@@ -38,3 +38,6 @@ npm-debug.log
 # Environment
 .env
 
+# TLS certificates (self-signed / generated — never commit keys)
+/priv/cert/
+
