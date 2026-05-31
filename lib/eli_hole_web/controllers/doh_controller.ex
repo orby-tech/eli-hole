@@ -42,12 +42,15 @@ defmodule EliHoleWeb.DohController do
   def query(conn, _params), do: send_resp(conn, 400, "missing dns query")
 
   defp respond(conn, packet) do
-    response = Handler.process(packet, client_display(conn), :doh)
+    response = Handler.process(packet, client_display(conn), :doh, rate_key(conn))
 
     conn
     |> put_resp_content_type(@content_type)
     |> send_resp(200, response)
   end
+
+  defp rate_key(%Plug.Conn{remote_ip: ip}) when not is_nil(ip), do: to_string(:inet.ntoa(ip))
+  defp rate_key(_conn), do: nil
 
   defp read_query_body(conn) do
     case Plug.Conn.read_body(conn, length: @max_query_size) do

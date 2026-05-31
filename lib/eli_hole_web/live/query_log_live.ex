@@ -72,6 +72,7 @@ defmodule EliHoleWeb.QueryLogLive do
                     cond do
                       q.status == :ok -> "badge-success"
                       q.status == :blocked -> "badge-warning"
+                      q.status == :rate_limited -> "badge-neutral"
                       true -> "badge-error"
                     end
                   ]}>

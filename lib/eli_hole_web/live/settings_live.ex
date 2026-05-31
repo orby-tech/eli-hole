@@ -1,7 +1,16 @@
 defmodule EliHoleWeb.SettingsLive do
   use EliHoleWeb, :live_view
 
-  alias EliHole.DNS.{Blocklist, Cache, Providers, SpeedTracker, Teleporter, Whitelist}
+  alias EliHole.DNS.{
+    Blocklist,
+    Cache,
+    Providers,
+    RateLimiter,
+    SpeedTracker,
+    Teleporter,
+    Whitelist
+  }
+
   alias EliHole.DNSSEC.Config, as: DnssecConfig
 
   @impl true
@@ -9,6 +18,7 @@ defmodule EliHoleWeb.SettingsLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:cache_settings")
       Phoenix.PubSub.subscribe(EliHole.PubSub, "dnssec:config")
+      Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:rate_limit")
     end
 
     cache_stats = Cache.stats()
@@ -27,6 +37,7 @@ defmodule EliHoleWeb.SettingsLive do
      |> assign(:presets, Cache.presets())
      |> assign(:speed_stats, SpeedTracker.stats())
      |> assign(:dnssec_enforce, DnssecConfig.enforce?())
+     |> assign_rate_limit(RateLimiter.config())
      |> assign(:import_result, nil)
      |> allow_upload(:teleporter_file,
        accept: ~w(.gz),
@@ -38,6 +49,11 @@ defmodule EliHoleWeb.SettingsLive do
   @impl true
   def handle_info({:enforce_changed, value}, socket) do
     {:noreply, assign(socket, :dnssec_enforce, value)}
+  end
+
+  @impl true
+  def handle_info({:rate_limit_changed, config}, socket) do
+    {:noreply, assign_rate_limit(socket, config)}
   end
 
   @impl true
@@ -65,6 +81,24 @@ defmodule EliHoleWeb.SettingsLive do
   def handle_event("toggle_dnssec_enforce", _, socket) do
     DnssecConfig.set_enforce(!socket.assigns.dnssec_enforce)
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("toggle_rate_limit", _, socket) do
+    RateLimiter.set_enabled(!socket.assigns.rate_limit_enabled)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("set_rate_limit", %{"limit" => limit_str}, socket) do
+    case Integer.parse(limit_str) do
+      {n, _} when n > 0 ->
+        RateLimiter.set_limit(n)
+        {:noreply, assign(socket, :rate_limit_input, to_string(n))}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Limit must be a positive integer")}
+    end
   end
 
   @impl true
@@ -186,6 +220,12 @@ defmodule EliHoleWeb.SettingsLive do
     {:noreply, socket}
   end
 
+  defp assign_rate_limit(socket, %{enabled: enabled, limit: limit}) do
+    socket
+    |> assign(:rate_limit_enabled, enabled)
+    |> assign(:rate_limit_input, to_string(limit))
+  end
+
   defp detect_active_presets(upstreams) do
     upstream_set = MapSet.new(upstreams)
 
@@ -226,6 +266,43 @@ defmodule EliHoleWeb.SettingsLive do
             Enforcement adds upstream lookups to the query path; if validation is wrong a
             domain can be SERVFAIL'd. Unsigned domains (insecure) are unaffected.
           </p>
+        </div>
+
+        <div class="bg-base-200 rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-lg font-semibold">Rate limiting</h2>
+              <p class="text-sm opacity-60">
+                Throttle each client (by source IP) to a maximum number of queries
+                per second. Excess queries are refused (REFUSED) before any upstream
+                lookup and show as <span class="badge badge-neutral badge-sm">rate_limited</span>
+                in the query log. Off by default.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              class="toggle toggle-primary"
+              checked={@rate_limit_enabled}
+              phx-click="toggle_rate_limit"
+              aria-label="Toggle rate limiting"
+            />
+          </div>
+          <form
+            :if={@rate_limit_enabled}
+            phx-submit="set_rate_limit"
+            class="flex items-center gap-2"
+          >
+            <label class="text-sm opacity-60 shrink-0">Queries/sec per client:</label>
+            <input
+              type="number"
+              name="limit"
+              value={@rate_limit_input}
+              min="1"
+              max="100000"
+              class="input input-sm input-bordered w-28"
+            />
+            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+          </form>
         </div>
 
         <div class="bg-base-200 rounded-xl p-4 space-y-3">

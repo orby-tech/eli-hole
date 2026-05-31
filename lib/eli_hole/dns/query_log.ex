@@ -34,16 +34,23 @@ defmodule EliHole.DNS.QueryLog do
     all = :ets.tab2list(@table)
     total = length(all)
 
-    {resolved, blocked, failed} =
-      Enum.reduce(all, {0, 0, 0}, fn {_ts, entry}, {r, b, f} ->
+    {resolved, blocked, failed, rate_limited} =
+      Enum.reduce(all, {0, 0, 0, 0}, fn {_ts, entry}, {r, b, f, rl} ->
         cond do
-          entry.status == :ok -> {r + 1, b, f}
-          entry.status == :blocked -> {r, b + 1, f}
-          true -> {r, b, f + 1}
+          entry.status == :ok -> {r + 1, b, f, rl}
+          entry.status == :blocked -> {r, b + 1, f, rl}
+          entry.status == :rate_limited -> {r, b, f, rl + 1}
+          true -> {r, b, f + 1, rl}
         end
       end)
 
-    %{total: total, resolved: resolved, blocked: blocked, failed: failed}
+    %{
+      total: total,
+      resolved: resolved,
+      blocked: blocked,
+      failed: failed,
+      rate_limited: rate_limited
+    }
   end
 
   def top_domains(limit \\ 10) do
@@ -72,7 +79,8 @@ defmodule EliHole.DNS.QueryLog do
       %{
         ok: Map.get(freqs, :ok, 0),
         error: Map.get(freqs, :error, 0),
-        blocked: Map.get(freqs, :blocked, 0)
+        blocked: Map.get(freqs, :blocked, 0),
+        rate_limited: Map.get(freqs, :rate_limited, 0)
       }
     end)
   end

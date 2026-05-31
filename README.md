@@ -13,7 +13,8 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - DNS response caching with configurable TTL (ETS, default 300s)
 - Blocked domains return `0.0.0.0` for A records, NXDOMAIN for others
 - Upstream speed tracking with weighted random selection
-- All transports (UDP / DoT / DoH) share one `DNS.Handler` — blocking, caching, and DNSSEC behave identically; each query is tagged with its transport in the log
+- **Rate limiting** — optional per-client (source-IP) query throttling; excess queries are refused (REFUSED) before any upstream lookup and logged as `rate_limited`. Off by default, configurable queries/sec at `/admin/settings`
+- All transports (UDP / DoT / DoH) share one `DNS.Handler` — blocking, caching, DNSSEC, and rate limiting behave identically; each query is tagged with its transport in the log
 
 ### Local DNS
 - Custom domain-to-IP mappings (A, AAAA, CNAME records)
@@ -74,7 +75,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - **Gravity** (`/admin/gravity`) — adlist management, add/remove URLs, trigger update, view status
 - **Local DNS** (`/admin/local-dns`) — custom domain records (A/AAAA/CNAME), bulk import, search
 - **Cluster** (`/admin/cluster`) — master: add/remove slave nodes, view stats, push config; slave: connection status; standalone: setup instructions
-- **Settings** (`/admin/settings`) — DNSSEC enforcement toggle, upstream DNS providers (presets: Google/Cloudflare/Quad9 + custom), cache TTL, flush cache, upstream speed table, teleporter import/export
+- **Settings** (`/admin/settings`) — DNSSEC enforcement toggle, rate-limiting toggle + queries/sec, upstream DNS providers (presets: Google/Cloudflare/Quad9 + custom), cache TTL, flush cache, upstream speed table, teleporter import/export
 
 ### Auth
 - Admin user via `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars (min 8 chars for password)
@@ -187,6 +188,7 @@ Client DNS query (UDP)
 | `EliHole.DNS.Blocklist` | ETS-backed domain blocking (exact/wildcard/regex) |
 | `EliHole.DNS.Whitelist` | ETS-backed allowlist; bypasses blocklist (exact/wildcard/regex) |
 | `EliHole.DNS.SpeedTracker` | Upstream latency tracking + weighted selection |
+| `EliHole.DNS.RateLimiter` | Per-client (source-IP) query throttling (ETS atomic counters, off by default) |
 | `EliHole.DNS.Gravity` | Scheduled adlist download and sync |
 | `EliHole.DNS.QueryLog` | ETS query history + PubSub broadcast |
 | `EliHole.DNSSEC.Validator` | Chain-of-trust validation root→name (secure/insecure/bogus) |
@@ -280,7 +282,7 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 
 ### Core DNS
 - [x] **DNSSEC validation** — full chain-of-trust validation from the ICANN root, shown per query in the admin log (secure/insecure/bogus); see [`docs/DNSSEC.md`](docs/DNSSEC.md). _Remaining: SERVFAIL enforcement on bogus, NSEC/NSEC3 denial-of-existence._
-- [ ] **Rate limiting** — per-client query throttling
+- [x] **Rate limiting** — optional per-client (source-IP) query throttling; excess refused (REFUSED) before upstream, logged as `rate_limited`, configurable at `/admin/settings`
 - [ ] **Conditional forwarding** — route specific domains to specific upstreams
 
 ### Admin Panel

@@ -137,7 +137,8 @@ defmodule EliHole.DNS.DoTServer do
 
     case :ssl.handshake(transport_socket, @handshake_timeout) do
       {:ok, socket} ->
-        serve(socket, peer_display(socket))
+        {peer, rate_key} = peer_info(socket)
+        serve(socket, peer, rate_key)
 
       {:error, reason} ->
         Logger.debug("DoT handshake failed: #{inspect(reason)}")
@@ -145,28 +146,33 @@ defmodule EliHole.DNS.DoTServer do
     end
   end
 
-  defp serve(socket, peer) do
+  defp serve(socket, peer, rate_key) do
     case :ssl.recv(socket, 0, @idle_timeout) do
       {:ok, query} when byte_size(query) > 0 ->
-        response = Handler.process(query, peer, :dot)
+        response = Handler.process(query, peer, :dot, rate_key)
 
         case :ssl.send(socket, response) do
-          :ok -> serve(socket, peer)
+          :ok -> serve(socket, peer, rate_key)
           {:error, _} -> :ssl.close(socket)
         end
 
       {:ok, _empty} ->
-        serve(socket, peer)
+        serve(socket, peer, rate_key)
 
       {:error, _reason} ->
         :ssl.close(socket)
     end
   end
 
-  defp peer_display(socket) do
+  # Display string (`"ip:port"`) plus the bare IP key used for rate limiting.
+  defp peer_info(socket) do
     case :ssl.peername(socket) do
-      {:ok, {ip, port}} -> "#{:inet.ntoa(ip)}:#{port}"
-      _ -> "dot"
+      {:ok, {ip, port}} ->
+        ip_str = to_string(:inet.ntoa(ip))
+        {"#{ip_str}:#{port}", ip_str}
+
+      _ ->
+        {"dot", nil}
     end
   end
 end

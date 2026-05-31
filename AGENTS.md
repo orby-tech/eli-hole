@@ -13,7 +13,8 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole/dns/server.ex` — UDP DNS listener (GenServer, `:gen_udp`, port 5354)
 - `lib/eli_hole/dns/dot_server.ex` — DNS-over-TLS listener (RFC 7858, `:ssl`, `packet: 2`, default port 853); supervised task per connection, keep-alive + idle timeout; returns `:ignore` unless cert+key configured and present
 - `lib/eli_hole_web/controllers/doh_controller.ex` — DNS-over-HTTPS endpoint (RFC 8484) at `/dns-query`: `GET ?dns=<base64url>` + `POST application/dns-message` (no browser/session pipeline)
-- `lib/eli_hole/dns/handler.ex` — shared query pipeline for all transports (UDP/DoT/DoH): resolve + DNSSEC enforce + QueryLog; tags each query `:udp | :dot | :doh`
+- `lib/eli_hole/dns/handler.ex` — shared query pipeline for all transports (UDP/DoT/DoH): per-client rate-limit check → resolve + DNSSEC enforce + QueryLog; tags each query `:udp | :dot | :doh`. Throttled queries short-circuit to REFUSED (logged `:rate_limited`) before any upstream work; callers pass a bare source-IP `rate_key` (`nil` skips throttling)
+- `lib/eli_hole/dns/rate_limiter.ex` — RateLimiter GenServer: per-client (source-IP) query throttling via atomic per-second ETS counters (`:ets.update_counter`, lock-free on the hot path); `enabled?`/`limit` config ETS-cached + persisted to `dns_settings` (PubSub `dns:rate_limit`); disabled by default, `allow?/1` is a no-op when off
 - `lib/eli_hole/dns/resolver.ex` — forwards queries to upstream DNS, integrates cache; inspects answer-section CNAME targets to block CNAME-cloaked domains (whitelist overrides)
 - `lib/eli_hole/dns/cache.ex` — ETS-based DNS response cache with configurable TTL
 - `lib/eli_hole/dns/query_log.ex` — ETS query history with PubSub broadcast

@@ -372,7 +372,20 @@ defmodule EliHole.DNS.Resolver do
     _ -> <<>>
   end
 
-  defp build_servfail(query_packet) do
+  defp build_servfail(query_packet), do: build_rcode_response(query_packet, 2)
+
+  @doc """
+  Build a REFUSED (rcode 5) response echoing the query's question section.
+
+  Used by the `Handler` to turn a rate-limited query away before any upstream
+  resolution. REFUSED (rather than a silent drop) keeps the client's transport
+  satisfied while signalling that the server declined to answer.
+  """
+  def build_refused(query_packet), do: build_rcode_response(query_packet, 5)
+
+  # Header-only response (echoing the question) carrying the given rcode. Shared
+  # by SERVFAIL (2) and REFUSED (5).
+  defp build_rcode_response(query_packet, rcode) do
     case :inet_dns.decode(query_packet) do
       {:ok, record} ->
         header = :inet_dns.msg(record, :header)
@@ -383,7 +396,7 @@ defmodule EliHole.DNS.Resolver do
             id: id,
             qr: true,
             opcode: :query,
-            rcode: 2,
+            rcode: rcode,
             ra: true
           )
 

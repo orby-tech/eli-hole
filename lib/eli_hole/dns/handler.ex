@@ -9,7 +9,7 @@ defmodule EliHole.DNS.Handler do
   contract, enforcement, and query logging identical across all transports.
   """
 
-  alias EliHole.DNS.{QueryLog, Resolver}
+  alias EliHole.DNS.{QueryLog, RateLimiter, Resolver}
   alias EliHole.DNSSEC.Config
 
   require Logger
@@ -19,13 +19,48 @@ defmodule EliHole.DNS.Handler do
 
   `client` is a display string (`"ip:port"`). `transport` tags the query log
   (`:udp | :dot | :doh`) so the admin panel can show how each query arrived.
+  `rate_key` is the client's bare source IP used for per-client throttling
+  (`nil` skips the rate-limit check — e.g. when the peer can't be identified).
 
   When DNSSEC enforcement is on, validation runs before the caller sends the
   response so a `:bogus` answer can be withheld (SERVFAIL) and a `:secure` one
   gets the AD bit. Otherwise classification happens after the answer is built
   (off the client's critical path), exactly as the plain-UDP server did.
   """
-  def process(packet, client, transport \\ :udp) do
+  def process(packet, client, transport \\ :udp, rate_key \\ nil) do
+    if rate_limited?(rate_key) do
+      refuse(packet, client, transport)
+    else
+      resolve_and_log(packet, client, transport)
+    end
+  end
+
+  defp rate_limited?(nil), do: false
+  defp rate_limited?(key), do: not RateLimiter.allow?(key)
+
+  # Throttled query: turn it away with REFUSED before any upstream work, and
+  # record it so the admin panel surfaces the throttling.
+  defp refuse(packet, client, transport) do
+    {domain, qtype} = Resolver.extract_query_info(packet)
+    Logger.debug("DNS[#{transport}] rate-limited #{domain}/#{qtype} from #{client}")
+
+    QueryLog.log(%{
+      id: System.unique_integer([:positive]),
+      time: Calendar.strftime(DateTime.utc_now(), "%H:%M:%S"),
+      client: client,
+      domain: domain,
+      type: qtype,
+      upstream: nil,
+      duration_ms: 0,
+      status: :rate_limited,
+      dnssec: nil,
+      transport: transport
+    })
+
+    Resolver.build_refused(packet)
+  end
+
+  defp resolve_and_log(packet, client, transport) do
     enforce = Config.enforce?()
 
     {time_us, {status, upstream, response, domain, qtype, dnssec}} =

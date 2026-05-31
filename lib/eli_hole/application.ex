@@ -32,6 +32,7 @@ defmodule EliHole.Application do
         EliHole.DNS.Whitelist,
         EliHole.DNS.LocalDNS,
         EliHole.DNS.SpeedTracker,
+        EliHole.DNS.RateLimiter,
         EliHole.DNS.Gravity,
         EliHole.DNS.QueryLog,
         {EliHole.DNS.Server, port: Application.get_env(:eli_hole, :dns_port, 5354)},
