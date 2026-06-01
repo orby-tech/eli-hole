@@ -12,7 +12,16 @@ defmodule EliHole.DNS.QueryLog do
       bumped atomically with `:ets.update_counter/4`. This is what backs
       `stats/1`, `status_breakdown/1`, `dnssec_breakdown/1`, `top_domains/2`,
       and `top_clients/2`. Counts accumulate per UTC day (no 10k cap), so
-      totals survive the recent-ring churn and give true daily figures.
+      totals survive the recent-ring churn and give true daily figures. Every
+      stat function takes a `Date` *or* a `Date.Range`; a range sums the daily
+      counters across the window, which is how the weekly/monthly long-term
+      views are built (plus `daily_series/1` for the per-day trend chart).
+
+    * `@series_table` — per-status counters bucketed into fixed time slices
+      (`@bucket_seconds`), keyed by `{bucket_start_unix, status}` and bumped
+      atomically. Backs `series/0`, the dashboard "queries over time" chart.
+      Holds a rolling 24h window (`@series_buckets`); old buckets are reaped
+      alongside the daily aggregates.
 
   ISO-8601 date strings sort lexicographically == chronologically, so old days
   are reaped with a single `select_delete` range scan (`@retention_days`).
@@ -22,9 +31,14 @@ defmodule EliHole.DNS.QueryLog do
 
   @recent_table :dns_query_log
   @daily_table :dns_daily_stats
+  @series_table :dns_query_series
   @max_recent 1_000
   @retention_days 30
   @prune_interval :timer.hours(6)
+
+  # 10-minute buckets over a rolling 24h window (144 buckets) for the chart.
+  @bucket_seconds 600
+  @series_buckets 144
 
   @statuses [:ok, :blocked, :error, :rate_limited]
   @verdicts [:secure, :insecure, :bogus]
@@ -56,9 +70,15 @@ defmodule EliHole.DNS.QueryLog do
     |> Enum.map(fn {_ts, entry} -> entry end)
   end
 
-  @doc "Aggregate query totals for a UTC day (default: today)."
-  def stats(date \\ Date.utc_today()) do
-    counts = status_counts(date)
+  @doc """
+  Aggregate query totals over a period (default: today).
+
+  Accepts a single `Date` or a `Date.Range` — passing a range (e.g.
+  `Date.range(Date.add(today, -6), today)`) sums the per-day counters across
+  the whole window, which is how weekly/monthly long-term stats are built.
+  """
+  def stats(period \\ Date.utc_today()) do
+    counts = status_counts(period)
 
     %{
       total: counts.ok + counts.blocked + counts.error + counts.rate_limited,
@@ -69,23 +89,44 @@ defmodule EliHole.DNS.QueryLog do
     }
   end
 
-  @doc "Per-status counts for a UTC day (default: today)."
-  def status_breakdown(date \\ Date.utc_today()), do: status_counts(date)
+  @doc "Per-status counts over a period (`Date` or `Date.Range`, default: today)."
+  def status_breakdown(period \\ Date.utc_today()), do: status_counts(period)
 
-  @doc "Counts of DNSSEC validation verdicts for a UTC day (entries without a verdict ignored)."
-  def dnssec_breakdown(date \\ Date.utc_today()) do
-    ds = Date.to_iso8601(date)
-    Map.new(@verdicts, fn v -> {v, counter(ds, :dnssec, v)} end)
+  @doc "Counts of DNSSEC validation verdicts over a period (entries without a verdict ignored)."
+  def dnssec_breakdown(period \\ Date.utc_today()) do
+    Map.new(@verdicts, fn v -> {v, sum_kind(:dnssec, v, period)} end)
   end
 
-  @doc "Most-queried domains for a UTC day, descending."
-  def top_domains(limit \\ 10, date \\ Date.utc_today()) do
-    top(:domain, date, limit)
+  @doc "Most-queried domains over a period, descending."
+  def top_domains(limit \\ 10, period \\ Date.utc_today()) do
+    top(:domain, period, limit)
   end
 
-  @doc "Busiest clients for a UTC day, descending."
-  def top_clients(limit \\ 10, date \\ Date.utc_today()) do
-    top(:client, date, limit)
+  @doc "Busiest clients over a period, descending."
+  def top_clients(limit \\ 10, period \\ Date.utc_today()) do
+    top(:client, period, limit)
+  end
+
+  @doc """
+  Per-UTC-day query totals over a date range, oldest day first.
+
+  Each entry is `%{date, ok, blocked, error, rate_limited, total}`. Backs the
+  dashboard long-term "daily totals" trend chart for the 7-day / 30-day views.
+  Days with no traffic are included as zero rows so the x-axis stays stable.
+  """
+  def daily_series(%Date.Range{} = range) do
+    for date <- range do
+      counts = status_counts(date)
+
+      %{
+        date: date,
+        ok: counts.ok,
+        blocked: counts.blocked,
+        error: counts.error,
+        rate_limited: counts.rate_limited,
+        total: counts.ok + counts.blocked + counts.error + counts.rate_limited
+      }
+    end
   end
 
   @doc """
@@ -107,31 +148,94 @@ defmodule EliHole.DNS.QueryLog do
     |> then(&Float.round(&1 / 60, 1))
   end
 
+  @doc """
+  Per-status query counts bucketed over the last 24h, oldest bucket first.
+
+  Returns exactly `@series_buckets` entries (empty buckets filled with zeros)
+  so the chart has a stable x-axis. Each entry is
+  `%{ts, ok, blocked, error, rate_limited, total}` where `ts` is the bucket's
+  start as a unix second.
+  """
+  def series do
+    current = bucket_start(System.system_time(:second))
+    oldest = current - (@series_buckets - 1) * @bucket_seconds
+
+    by_bucket =
+      @series_table
+      |> :ets.select([
+        {{{:"$1", :"$2"}, :"$3"}, [{:>=, :"$1", oldest}], [{{:"$1", :"$2", :"$3"}}]}
+      ])
+      |> Enum.reduce(%{}, fn {bucket, status, n}, acc ->
+        Map.update(acc, bucket, %{status => n}, &Map.put(&1, status, n))
+      end)
+
+    for bucket <- oldest..current//@bucket_seconds do
+      counts = Map.get(by_bucket, bucket, %{})
+      ok = Map.get(counts, :ok, 0)
+      blocked = Map.get(counts, :blocked, 0)
+      error = Map.get(counts, :error, 0)
+      rate_limited = Map.get(counts, :rate_limited, 0)
+
+      %{
+        ts: bucket,
+        ok: ok,
+        blocked: blocked,
+        error: error,
+        rate_limited: rate_limited,
+        total: ok + blocked + error + rate_limited
+      }
+    end
+  end
+
   def clear do
     GenServer.cast(__MODULE__, :clear)
   end
 
-  defp status_counts(date) do
-    ds = Date.to_iso8601(date)
-    Map.new(@statuses, fn s -> {s, counter(ds, :status, s)} end)
+  defp status_counts(period) do
+    Map.new(@statuses, fn s -> {s, sum_kind(:status, s, period)} end)
   end
 
-  defp counter(ds, kind, key) do
-    case :ets.lookup(@daily_table, {ds, kind, key}) do
-      [{_key, n}] -> n
-      [] -> 0
-    end
+  # Sum the daily counter for one `{kind, key}` across every day in the period.
+  # ISO date strings compare lexicographically == chronologically, so a single
+  # bounded range match-spec covers a one-day or a multi-day window alike.
+  defp sum_kind(kind, key, period) do
+    {from_ds, to_ds} = iso_bounds(period)
+
+    @daily_table
+    |> :ets.select([
+      {{{:"$1", kind, key}, :"$2"}, [{:>=, :"$1", from_ds}, {:"=<", :"$1", to_ds}], [:"$2"]}
+    ])
+    |> Enum.sum()
   end
 
-  defp top(kind, date, limit) do
-    ds = Date.to_iso8601(date)
+  # Top domains/clients over the period: pull every matching day, fold counts
+  # per key (a busy domain spans many days), then rank.
+  defp top(kind, period, limit) do
+    {from_ds, to_ds} = iso_bounds(period)
     field = if kind == :domain, do: :domain, else: :client
 
     @daily_table
-    |> :ets.select([{{{ds, kind, :"$1"}, :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> :ets.select([
+      {{{:"$1", kind, :"$2"}, :"$3"}, [{:>=, :"$1", from_ds}, {:"=<", :"$1", to_ds}],
+       [{{:"$2", :"$3"}}]}
+    ])
+    |> Enum.reduce(%{}, fn {key, count}, acc -> Map.update(acc, key, count, &(&1 + count)) end)
     |> Enum.sort_by(fn {_key, count} -> count end, :desc)
     |> Enum.take(limit)
     |> Enum.map(fn {key, count} -> %{field => key, :count => count} end)
+  end
+
+  # Normalize to {earlier_iso, later_iso} so a descending range (first > last)
+  # can't make every guard (>= from AND <= to) match nothing.
+  defp iso_bounds(%Date.Range{first: from, last: to}) do
+    a = Date.to_iso8601(from)
+    b = Date.to_iso8601(to)
+    if a <= b, do: {a, b}, else: {b, a}
+  end
+
+  defp iso_bounds(%Date{} = date) do
+    ds = Date.to_iso8601(date)
+    {ds, ds}
   end
 
   @impl true
@@ -139,6 +243,14 @@ defmodule EliHole.DNS.QueryLog do
     :ets.new(@recent_table, [:ordered_set, :named_table, :public, read_concurrency: true])
 
     :ets.new(@daily_table, [
+      :set,
+      :named_table,
+      :public,
+      read_concurrency: true,
+      write_concurrency: true
+    ])
+
+    :ets.new(@series_table, [
       :set,
       :named_table,
       :public,
@@ -164,12 +276,14 @@ defmodule EliHole.DNS.QueryLog do
   def handle_cast(:clear, state) do
     :ets.delete_all_objects(@recent_table)
     :ets.delete_all_objects(@daily_table)
+    :ets.delete_all_objects(@series_table)
     {:noreply, state}
   end
 
   @impl true
   def handle_info(:prune_days, state) do
     prune_days()
+    prune_series()
     schedule_prune()
     {:noreply, state}
   end
@@ -186,9 +300,14 @@ defmodule EliHole.DNS.QueryLog do
 
     if domain = Map.get(entry, :domain), do: bump({ds, :domain, domain})
     if client = Map.get(entry, :client), do: bump({ds, :client, client})
+
+    bucket_key = {bucket_start(System.system_time(:second)), entry.status}
+    :ets.update_counter(@series_table, bucket_key, {2, 1}, {bucket_key, 0})
   end
 
   defp bump(key), do: :ets.update_counter(@daily_table, key, {2, 1}, {key, 0})
+
+  defp bucket_start(unix), do: div(unix, @bucket_seconds) * @bucket_seconds
 
   defp prune_recent do
     size = :ets.info(@recent_table, :size)
@@ -209,6 +328,12 @@ defmodule EliHole.DNS.QueryLog do
   defp prune_days do
     cutoff = Date.utc_today() |> Date.add(-@retention_days) |> Date.to_iso8601()
     :ets.select_delete(@daily_table, [{{{:"$1", :_, :_}, :_}, [{:<, :"$1", cutoff}], [true]}])
+  end
+
+  # Drop time-series buckets older than the rolling 24h chart window.
+  defp prune_series do
+    cutoff = bucket_start(System.system_time(:second)) - (@series_buckets - 1) * @bucket_seconds
+    :ets.select_delete(@series_table, [{{{:"$1", :_}, :_}, [{:<, :"$1", cutoff}], [true]}])
   end
 
   defp schedule_prune, do: Process.send_after(self(), :prune_days, @prune_interval)

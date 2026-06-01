@@ -143,6 +143,165 @@ defmodule EliHole.DNS.QueryLogTest do
     end
   end
 
+  describe "long-term aggregates over a Date.Range" do
+    # Daily counters key on `{iso_date, kind, key}`; seed past days directly so
+    # we exercise the multi-day range summing without time-travelling the clock.
+    defp seed_day(date, kind, key, count) do
+      ds = Date.to_iso8601(date)
+      :ets.insert(:dns_daily_stats, {{ds, kind, key}, count})
+    end
+
+    test "stats/1 sums status counts across every day in the range" do
+      today = Date.utc_today()
+      seed_day(Date.add(today, -2), :status, :ok, 10)
+      seed_day(Date.add(today, -1), :status, :ok, 5)
+      seed_day(today, :status, :ok, 2)
+      seed_day(Date.add(today, -1), :status, :blocked, 4)
+      # Outside the 3-day window — must not be counted.
+      seed_day(Date.add(today, -9), :status, :ok, 999)
+
+      range = Date.range(Date.add(today, -2), today)
+      stats = QueryLog.stats(range)
+
+      assert stats.resolved == 17
+      assert stats.blocked == 4
+      assert stats.total == 21
+    end
+
+    test "top_domains/2 folds per-domain counts across days, then ranks" do
+      today = Date.utc_today()
+      seed_day(Date.add(today, -1), :domain, "a.com", 3)
+      seed_day(today, :domain, "a.com", 4)
+      seed_day(today, :domain, "b.com", 5)
+      # Outside the window — its count must not leak into the ranking.
+      seed_day(Date.add(today, -9), :domain, "a.com", 999)
+
+      range = Date.range(Date.add(today, -1), today)
+
+      assert QueryLog.top_domains(10, range) == [
+               %{domain: "a.com", count: 7},
+               %{domain: "b.com", count: 5}
+             ]
+    end
+
+    test "dnssec_breakdown/1 sums verdicts across the range" do
+      today = Date.utc_today()
+      seed_day(Date.add(today, -1), :dnssec, :secure, 2)
+      seed_day(today, :dnssec, :secure, 3)
+      seed_day(today, :dnssec, :bogus, 1)
+      # Outside the window — must not be summed in.
+      seed_day(Date.add(today, -9), :dnssec, :secure, 999)
+
+      range = Date.range(Date.add(today, -1), today)
+      assert QueryLog.dnssec_breakdown(range) == %{secure: 5, insecure: 0, bogus: 1}
+    end
+
+    test "a descending range is normalized and still sums the window" do
+      today = Date.utc_today()
+      seed_day(Date.add(today, -1), :status, :ok, 4)
+      seed_day(today, :status, :ok, 6)
+
+      # first > last (step -1) must not silently match nothing.
+      descending = Date.range(today, Date.add(today, -1), -1)
+      assert QueryLog.stats(descending).resolved == 10
+    end
+
+    test "a single Date still resolves to that day only" do
+      today = Date.utc_today()
+      seed_day(today, :status, :ok, 7)
+      seed_day(Date.add(today, -1), :status, :ok, 99)
+
+      assert QueryLog.stats(today).resolved == 7
+    end
+  end
+
+  describe "daily_series/1" do
+    test "returns one zero-filled row per day, oldest first" do
+      today = Date.utc_today()
+      range = Date.range(Date.add(today, -6), today)
+
+      series = QueryLog.daily_series(range)
+
+      assert length(series) == 7
+      assert Enum.all?(series, &(&1.total == 0))
+      assert List.first(series).date == Date.add(today, -6)
+      assert List.last(series).date == today
+    end
+
+    test "reflects per-day totals split by status" do
+      today = Date.utc_today()
+      ds = Date.to_iso8601(today)
+      :ets.insert(:dns_daily_stats, {{ds, :status, :ok}, 6})
+      :ets.insert(:dns_daily_stats, {{ds, :status, :blocked}, 2})
+
+      series = QueryLog.daily_series(Date.range(Date.add(today, -1), today))
+      latest = List.last(series)
+
+      assert latest.date == today
+      assert latest.ok == 6
+      assert latest.blocked == 2
+      assert latest.total == 8
+      # The seeded prior day had no traffic.
+      assert List.first(series).total == 0
+    end
+  end
+
+  describe "series/0" do
+    test "returns a full 24h window of zero buckets when empty" do
+      series = QueryLog.series()
+
+      assert length(series) == 144
+      assert Enum.all?(series, &(&1.total == 0))
+      # Oldest bucket first, newest last.
+      assert List.first(series).ts < List.last(series).ts
+    end
+
+    test "buckets the current statuses into the latest slot" do
+      QueryLog.log(%{domain: "a.com", type: "A", status: :ok, upstream: "x"})
+      QueryLog.log(%{domain: "b.com", type: "A", status: :ok, upstream: "x"})
+      QueryLog.log(%{domain: "c.com", type: "A", status: :blocked, upstream: nil})
+      QueryLog.log(%{domain: "d.com", type: "A", status: :error, upstream: nil})
+      _ = :sys.get_state(QueryLog)
+
+      current = List.last(QueryLog.series())
+      assert current.ok == 2
+      assert current.blocked == 1
+      assert current.error == 1
+      assert current.rate_limited == 0
+      assert current.total == 4
+    end
+
+    test "clear resets the series" do
+      QueryLog.log(%{domain: "x.com", type: "A", status: :ok, upstream: "x"})
+      _ = :sys.get_state(QueryLog)
+      assert List.last(QueryLog.series()).total == 1
+
+      QueryLog.clear()
+      _ = :sys.get_state(QueryLog)
+      assert Enum.all?(QueryLog.series(), &(&1.total == 0))
+    end
+
+    test "buckets older than the 24h window are excluded from series and reaped by prune" do
+      # Seed a bucket well outside the rolling window (~48h ago), aligned to a
+      # 10-minute boundary, directly in the series ETS table.
+      bucket_seconds = 600
+      old_ts = div(System.system_time(:second) - 48 * 3600, bucket_seconds) * bucket_seconds
+      key = {old_ts, :ok}
+      :ets.insert(:dns_query_series, {key, 7})
+
+      # series/0 reads only the in-window buckets, so the stale one never shows.
+      series = QueryLog.series()
+      assert length(series) == 144
+      assert Enum.all?(series, &(&1.ts > old_ts))
+      assert Enum.all?(series, &(&1.total == 0))
+
+      # The prune sweep physically removes it from the table.
+      send(QueryLog, :prune_days)
+      _ = :sys.get_state(QueryLog)
+      assert :ets.lookup(:dns_query_series, key) == []
+    end
+  end
+
   describe "recent ring pruning" do
     test "caps the live ring while daily aggregates keep the full count" do
       total = 1_050

@@ -16,6 +16,7 @@ defmodule EliHoleWeb.DashboardLive do
     {:ok,
      socket
      |> assign(:active_nav, :dashboard)
+     |> assign(:period, :today)
      |> assign(:pause, PauseControl.status())
      |> assign_stats()}
   end
@@ -56,26 +57,48 @@ defmodule EliHoleWeb.DashboardLive do
     {:noreply, assign(socket, :pause, PauseControl.status())}
   end
 
+  @impl true
+  def handle_event("set_period", %{"period" => period}, socket)
+      when period in ~w(today week month) do
+    {:noreply, socket |> assign(:period, String.to_existing_atom(period)) |> assign_stats()}
+  end
+
   defp schedule_refresh do
     Process.send_after(self(), :refresh, @refresh_interval)
   end
 
   defp assign_stats(socket) do
-    stats = QueryLog.stats()
-    breakdown = QueryLog.status_breakdown()
+    range = period_range(socket.assigns.period)
     cache_stats = Cache.stats()
     speed = SpeedTracker.stats()
     fastest = List.first(speed)
 
+    # Multi-day periods get a per-day trend chart; "today" leans on the 24h
+    # intraday series chart instead, so skip the daily rollup there.
+    daily = if socket.assigns.period == :today, do: [], else: QueryLog.daily_series(range)
+
     socket
-    |> assign(:stats, stats)
-    |> assign(:breakdown, breakdown)
-    |> assign(:dnssec, QueryLog.dnssec_breakdown())
+    |> assign(:stats, QueryLog.stats(range))
+    |> assign(:breakdown, QueryLog.status_breakdown(range))
+    |> assign(:dnssec, QueryLog.dnssec_breakdown(range))
     |> assign(:cache_stats, cache_stats)
-    |> assign(:top_domains, QueryLog.top_domains(10))
-    |> assign(:top_clients, QueryLog.top_clients(10))
+    |> assign(:top_domains, QueryLog.top_domains(10, range))
+    |> assign(:top_clients, QueryLog.top_clients(10, range))
     |> assign(:qps, QueryLog.recent_rate())
+    |> assign(:series, QueryLog.series())
+    |> assign(:daily, daily)
     |> assign(:fastest_upstream, fastest)
+  end
+
+  # Inclusive UTC date range for the selected dashboard period. Bounded by the
+  # 30-day daily-aggregate retention in QueryLog.
+  defp period_range(:today), do: Date.range(Date.utc_today(), Date.utc_today())
+  defp period_range(:week), do: trailing_range(7)
+  defp period_range(:month), do: trailing_range(30)
+
+  defp trailing_range(days) do
+    today = Date.utc_today()
+    Date.range(Date.add(today, -(days - 1)), today)
   end
 
   @impl true
@@ -83,7 +106,24 @@ defmodule EliHoleWeb.DashboardLive do
     ~H"""
     <Layouts.app flash={@flash} active_nav={@active_nav}>
       <div class="space-y-6">
-        <h1 class="text-2xl font-bold">Dashboard</h1>
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <h1 class="text-2xl font-bold">Dashboard</h1>
+          <div class="join" role="group" aria-label="Statistics period">
+            <button
+              :for={{p, label} <- [today: "Today", week: "7 days", month: "30 days"]}
+              id={"period-#{p}"}
+              phx-click="set_period"
+              phx-value-period={p}
+              aria-pressed={@period == p}
+              class={[
+                "btn btn-sm join-item",
+                if(@period == p, do: "btn-primary", else: "btn-outline")
+              ]}
+            >
+              {label}
+            </button>
+          </div>
+        </div>
 
         <div
           id="pause-control"
@@ -136,7 +176,7 @@ defmodule EliHoleWeb.DashboardLive do
 
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div class="bg-base-200 rounded-xl p-4">
-            <div class="text-sm opacity-60">Total Queries (today)</div>
+            <div class="text-sm opacity-60">Total Queries ({period_label(@period)})</div>
             <div class="text-3xl font-bold">{@stats.total}</div>
           </div>
           <div class="bg-base-200 rounded-xl p-4">
@@ -154,6 +194,160 @@ defmodule EliHoleWeb.DashboardLive do
           <div class="bg-base-200 rounded-xl p-4">
             <div class="text-sm opacity-60">Queries/sec</div>
             <div class="text-3xl font-bold">{@qps}</div>
+          </div>
+        </div>
+
+        <div class="bg-base-200 rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold">Queries Over Time (24h)</h2>
+            <div class="flex items-center gap-3 text-xs opacity-60">
+              <span class="flex items-center gap-1">
+                <span class="size-2 rounded-full bg-success"></span>Allowed
+              </span>
+              <span class="flex items-center gap-1">
+                <span class="size-2 rounded-full bg-warning"></span>Blocked
+              </span>
+              <span class="flex items-center gap-1">
+                <span class="size-2 rounded-full bg-error"></span>Failed
+              </span>
+            </div>
+          </div>
+
+          <% chart_data? = Enum.any?(@series, &(&1.total > 0)) %>
+
+          <div :if={not chart_data?} class="text-sm opacity-40 py-12 text-center">
+            No queries yet
+          </div>
+
+          <svg
+            :if={chart_data?}
+            viewBox={"0 0 #{length(@series)} 100"}
+            preserveAspectRatio="none"
+            class="w-full h-40"
+            role="img"
+            aria-label="Queries over the last 24 hours"
+          >
+            <% max = series_max(@series) %>
+            <%= for {bucket, i} <- Enum.with_index(@series) do %>
+              <% ok_h = bucket.ok / max * 100 %>
+              <% blocked_h = bucket.blocked / max * 100 %>
+              <% other_h = (bucket.error + bucket.rate_limited) / max * 100 %>
+              <rect x={i} y="0" width="1" height="100" fill="transparent">
+                <title>
+                  {bucket_label(bucket.ts)} — {bucket.total} queries ({bucket.blocked} blocked, {bucket.error +
+                    bucket.rate_limited} failed)
+                </title>
+              </rect>
+              <rect
+                :if={ok_h > 0}
+                x={i + 0.1}
+                width="0.8"
+                y={100 - ok_h}
+                height={ok_h}
+                fill="currentColor"
+                class="text-success"
+              />
+              <rect
+                :if={blocked_h > 0}
+                x={i + 0.1}
+                width="0.8"
+                y={100 - ok_h - blocked_h}
+                height={blocked_h}
+                fill="currentColor"
+                class="text-warning"
+              />
+              <rect
+                :if={other_h > 0}
+                x={i + 0.1}
+                width="0.8"
+                y={100 - ok_h - blocked_h - other_h}
+                height={other_h}
+                fill="currentColor"
+                class="text-error"
+              />
+            <% end %>
+          </svg>
+
+          <div :if={chart_data?} class="flex justify-between text-xs opacity-40 tabular-nums">
+            <span>{bucket_label(List.first(@series).ts)}</span>
+            <span>{bucket_label(List.last(@series).ts)}</span>
+          </div>
+        </div>
+
+        <div :if={@daily != []} class="bg-base-200 rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold">Daily Totals ({period_label(@period)})</h2>
+            <div class="flex items-center gap-3 text-xs opacity-60">
+              <span class="flex items-center gap-1">
+                <span class="size-2 rounded-full bg-success"></span>Allowed
+              </span>
+              <span class="flex items-center gap-1">
+                <span class="size-2 rounded-full bg-warning"></span>Blocked
+              </span>
+              <span class="flex items-center gap-1">
+                <span class="size-2 rounded-full bg-error"></span>Failed
+              </span>
+            </div>
+          </div>
+
+          <% daily_data? = Enum.any?(@daily, &(&1.total > 0)) %>
+
+          <div :if={not daily_data?} class="text-sm opacity-40 py-12 text-center">
+            No queries in this period
+          </div>
+
+          <svg
+            :if={daily_data?}
+            viewBox={"0 0 #{length(@daily)} 100"}
+            preserveAspectRatio="none"
+            class="w-full h-40"
+            role="img"
+            aria-label={"Daily query totals over the last #{length(@daily)} days"}
+          >
+            <% dmax = daily_max(@daily) %>
+            <%= for {day, i} <- Enum.with_index(@daily) do %>
+              <% ok_h = day.ok / dmax * 100 %>
+              <% blocked_h = day.blocked / dmax * 100 %>
+              <% other_h = (day.error + day.rate_limited) / dmax * 100 %>
+              <rect x={i} y="0" width="1" height="100" fill="transparent">
+                <title>
+                  {day_label(day.date)} — {day.total} queries ({day.blocked} blocked, {day.error +
+                    day.rate_limited} failed)
+                </title>
+              </rect>
+              <rect
+                :if={ok_h > 0}
+                x={i + 0.1}
+                width="0.8"
+                y={100 - ok_h}
+                height={ok_h}
+                fill="currentColor"
+                class="text-success"
+              />
+              <rect
+                :if={blocked_h > 0}
+                x={i + 0.1}
+                width="0.8"
+                y={100 - ok_h - blocked_h}
+                height={blocked_h}
+                fill="currentColor"
+                class="text-warning"
+              />
+              <rect
+                :if={other_h > 0}
+                x={i + 0.1}
+                width="0.8"
+                y={100 - ok_h - blocked_h - other_h}
+                height={other_h}
+                fill="currentColor"
+                class="text-error"
+              />
+            <% end %>
+          </svg>
+
+          <div :if={daily_data?} class="flex justify-between text-xs opacity-40 tabular-nums">
+            <span>{day_label(List.first(@daily).date)}</span>
+            <span>{day_label(List.last(@daily).date)}</span>
           </div>
         </div>
 
@@ -259,6 +453,24 @@ defmodule EliHoleWeb.DashboardLive do
   end
 
   defp format_remaining(_), do: "0:00"
+
+  defp series_max(series) do
+    series |> Enum.map(& &1.total) |> Enum.max(fn -> 0 end) |> max(1)
+  end
+
+  defp bucket_label(unix) do
+    unix |> DateTime.from_unix!() |> Calendar.strftime("%H:%M")
+  end
+
+  defp period_label(:today), do: "today"
+  defp period_label(:week), do: "7 days"
+  defp period_label(:month), do: "30 days"
+
+  defp daily_max(daily) do
+    daily |> Enum.map(& &1.total) |> Enum.max(fn -> 0 end) |> max(1)
+  end
+
+  defp day_label(%Date{} = date), do: Calendar.strftime(date, "%b %-d")
 
   defp bar_width(_count, []), do: 0
 
