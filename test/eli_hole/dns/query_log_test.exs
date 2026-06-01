@@ -111,21 +111,52 @@ defmodule EliHole.DNS.QueryLogTest do
     end
   end
 
-  describe "pruning at max_entries" do
-    test "prunes oldest entries when exceeding 10_000" do
-      # Insert more than max_entries to trigger pruning multiple times
-      for i <- 1..10_050 do
+  describe "top_domains/1 and top_clients/1" do
+    test "rank by frequency, descending, respecting the limit" do
+      log_n = fn domain, client, n ->
+        for _ <- 1..n,
+            do:
+              QueryLog.log(%{
+                domain: domain,
+                client: client,
+                type: "A",
+                status: :ok,
+                upstream: "x"
+              })
+      end
+
+      log_n.("popular.com", "10.0.0.1", 5)
+      log_n.("medium.com", "10.0.0.2", 3)
+      log_n.("rare.com", "10.0.0.3", 1)
+      _ = :sys.get_state(QueryLog)
+
+      assert QueryLog.top_domains() == [
+               %{domain: "popular.com", count: 5},
+               %{domain: "medium.com", count: 3},
+               %{domain: "rare.com", count: 1}
+             ]
+
+      assert QueryLog.top_clients(2) == [
+               %{client: "10.0.0.1", count: 5},
+               %{client: "10.0.0.2", count: 3}
+             ]
+    end
+  end
+
+  describe "recent ring pruning" do
+    test "caps the live ring while daily aggregates keep the full count" do
+      total = 1_050
+
+      for i <- 1..total do
         QueryLog.log(%{domain: "prune#{i}.com", type: "A", status: :ok, upstream: "8.8.8.8:53"})
       end
 
-      # Sync: send a synchronous call to ensure all preceding casts are processed
       _ = :sys.get_state(QueryLog)
 
-      stats = QueryLog.stats()
-      # After pruning, size should be at most max_entries (10,000)
-      assert stats.total <= 10_000
-      # And it should have a meaningful number of entries (not accidentally cleared)
-      assert stats.total >= 9_900
+      # The live ring is capped (@max_recent = 1_000) regardless of how many ask.
+      assert length(QueryLog.recent(10_000)) == 1_000
+      # Daily aggregates are uncapped — every query is counted.
+      assert QueryLog.stats().total == total
     end
   end
 end

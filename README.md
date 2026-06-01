@@ -69,8 +69,9 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Auto-detect backup format (Pi-hole vs EliHole)
 
 ### Admin Panel (LiveView)
-- **Dashboard** (`/admin`) — total queries, resolved/blocked/failed counts, queries/sec, top domains, top clients, cache stats, fastest upstream
-- **Query Log** (`/admin/queries`) — real-time query stream via PubSub, per-query status/timing/upstream
+- **Dashboard** (`/admin`) — today's query totals, resolved/blocked/failed counts, queries/sec, top domains, top clients, cache stats, fastest upstream
+- **Query Log** (`/admin/queries`) — real-time query stream via PubSub (capped live ring), per-query status/timing/upstream
+- **Daily stats** — dashboard counts (totals, status/DNSSEC breakdowns, top domains/clients) come from per-UTC-day aggregate ETS counters (atomic `update_counter`, 30-day retention), not from scanning a 10k full-entry log; the live ring (1k) only feeds the real-time stream and queries/sec gauge
 - **Blocklist** (`/admin/blocklist`) — search, add/edit/delete entries, toggle enable/disable, pagination
 - **Whitelist** (`/admin/whitelist`) — allowlist domains that bypass the blocklist; search, CRUD, bulk import, pagination
 - **Gravity** (`/admin/gravity`) — adlist management, add/remove URLs, trigger update, view status
@@ -293,7 +294,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 - [ ] **Client groups** — group clients with different blocklist rules
 - [ ] **Query log persistence** — store history in Postgres (currently ETS, lost on restart)
 - [ ] **Long-term statistics** — daily/weekly/monthly aggregates
-- [ ] **Daily stats** - replace 10000 query ETS log with daily aggregates for top domains/clients, total queries, blocked queries, etc.
 - [ ] **Redirect pi-hole admin URLs** — redirect `/#/*` to EliHole's admin paths
 
 ### Operations

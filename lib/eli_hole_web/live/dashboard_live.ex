@@ -136,7 +136,7 @@ defmodule EliHoleWeb.DashboardLive do
 
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div class="bg-base-200 rounded-xl p-4">
-            <div class="text-sm opacity-60">Total Queries</div>
+            <div class="text-sm opacity-60">Total Queries (today)</div>
             <div class="text-3xl font-bold">{@stats.total}</div>
           </div>
           <div class="bg-base-200 rounded-xl p-4">

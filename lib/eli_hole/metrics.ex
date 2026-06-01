@@ -2,10 +2,10 @@ defmodule EliHole.Metrics do
   @moduledoc """
   Prometheus text-exposition (version 0.0.4) exporter behind `GET /metrics`.
 
-  Sourced from the in-memory `QueryLog` and `Cache` plus `Health` component
+  Sourced from `QueryLog` daily aggregates and `Cache` plus `Health` component
   liveness. The query/DNSSEC counts are emitted as **gauges**, not counters:
-  `QueryLog` is a rolling, capped ETS window (not monotonic), so a counter type
-  would be a lie to the scraper.
+  they are per-UTC-day totals that reset at midnight (not monotonic), so a
+  counter type would be a lie to the scraper.
   """
 
   alias EliHole.DNS.{Cache, QueryLog}
@@ -18,19 +18,19 @@ defmodule EliHole.Metrics do
     health = EliHole.Health.check()
 
     [
-      gauge("elihole_dns_queries", "DNS queries in the rolling in-memory log, by status", [
+      gauge("elihole_dns_queries", "DNS queries today (UTC), by status", [
         {%{status: "resolved"}, qstats.resolved},
         {%{status: "blocked"}, qstats.blocked},
         {%{status: "failed"}, qstats.failed},
         {%{status: "rate_limited"}, qstats.rate_limited}
       ]),
-      gauge("elihole_dns_queries_logged", "Queries currently retained in the rolling log", [
+      gauge("elihole_dns_queries_logged", "Total DNS queries today (UTC)", [
         {%{}, qstats.total}
       ]),
       gauge("elihole_dns_queries_per_second", "Average queries per second over the last 60s", [
         {%{}, QueryLog.recent_rate()}
       ]),
-      gauge("elihole_dnssec_validations", "DNSSEC validation verdicts in the rolling log", [
+      gauge("elihole_dnssec_validations", "DNSSEC validation verdicts today (UTC)", [
         {%{verdict: "secure"}, dnssec.secure},
         {%{verdict: "insecure"}, dnssec.insecure},
         {%{verdict: "bogus"}, dnssec.bogus}
