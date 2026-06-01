@@ -84,14 +84,37 @@ defmodule EliHole.DNS.Teleporter do
       {"local_dns.json", local_dns}
     ]
 
-    tar_files =
-      Enum.map(files, fn {name, content} ->
-        {String.to_charlist(name), content}
-      end)
+    create_targz(files)
+  end
 
-    case :erl_tar.create({:binary, []}, tar_files, [:compressed]) do
-      {:ok, {_, tar_binary}} -> {:ok, tar_binary}
-      {:error, reason} -> {:error, reason}
+  # Builds a gzip-compressed tar from in-memory {name, content} pairs.
+  #
+  # OTP's `:erl_tar.create/3` does not support an in-memory `{:binary, []}`
+  # write device, so we stage the files in a temp dir, tar from real paths
+  # (the supported `{name_in_archive, filename}` form), read the bytes back,
+  # then clean up.
+  defp create_targz(files) do
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "elihole_export_#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(tmp_dir)
+
+    try do
+      tar_files =
+        Enum.map(files, fn {name, content} ->
+          path = Path.join(tmp_dir, name)
+          File.write!(path, content)
+          {String.to_charlist(name), String.to_charlist(path)}
+        end)
+
+      tar_path = Path.join(tmp_dir, "export.tar.gz")
+
+      case :erl_tar.create(String.to_charlist(tar_path), tar_files, [:compressed]) do
+        :ok -> {:ok, File.read!(tar_path)}
+        {:error, reason} -> {:error, reason}
+      end
+    after
+      File.rm_rf(tmp_dir)
     end
   end
 
@@ -356,6 +379,9 @@ defmodule EliHole.DNS.Teleporter do
         case Jason.decode(content) do
           {:ok, list} when is_list(list) and list != [] ->
             [label | acc]
+
+          {:ok, []} ->
+            acc
 
           _ ->
             if String.trim(content) != "", do: [label | acc], else: acc

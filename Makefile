@@ -57,6 +57,15 @@ test:
 test.watch:
 	@$(load_env) && mix test --stale --listen-on-stdin
 
+# Run a single test file/dir: make test.one FILE=test/path/to_test.exs
+test.one:
+	@$(load_env) && mix test $(FILE)
+
+# Run tests writing full output to a file we control (bypasses stdout wrappers).
+# Usage: make test.log ARGS="--seed 123"  -> reads /tmp/claude/elixir_test.log
+test.log:
+	@$(load_env) && set -o pipefail && mix test $(ARGS) 2>&1 | tee /tmp/claude/elixir_test.log
+
 routes:
 	@$(load_env) && mix phx.routes
 

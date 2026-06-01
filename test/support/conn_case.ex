@@ -35,4 +35,32 @@ defmodule EliHoleWeb.ConnCase do
     EliHole.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Creates an admin user and logs them into the given `conn`'s session.
+
+  Returns `%{conn: conn, admin: admin}` so it can be used directly as an
+  ExUnit `setup`:
+
+      setup :register_and_log_in_admin
+  """
+  def register_and_log_in_admin(%{conn: conn}) do
+    {:ok, admin} =
+      EliHole.Accounts.create_admin(%{
+        "username" => "admin_#{System.unique_integer([:positive])}",
+        "password" => "supersecret123"
+      })
+
+    %{conn: log_in_admin(conn, admin), admin: admin}
+  end
+
+  @doc """
+  Puts the admin user's id into the session so authenticated routes pass
+  `EliHoleWeb.Plugs.RequireAuth`.
+  """
+  def log_in_admin(conn, admin) do
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> Plug.Conn.put_session(:admin_user_id, admin.id)
+  end
 end
