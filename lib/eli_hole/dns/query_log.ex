@@ -29,12 +29,25 @@ defmodule EliHole.DNS.QueryLog do
 
   use GenServer
 
+  require Logger
+
+  alias EliHole.DNS.QueryHistory
+
   @recent_table :dns_query_log
   @daily_table :dns_daily_stats
   @series_table :dns_query_series
   @max_recent 1_000
   @retention_days 30
   @prune_interval :timer.hours(6)
+
+  # Buffer persisted-row writes and flush them in batches so the DB round-trip
+  # never sits on the per-query logging path: flush once the buffer fills or the
+  # timer fires, whichever comes first. A graceful shutdown flushes via
+  # terminate/2; a hard crash (kill -9, OOM, power loss) drops at most one
+  # unflushed buffer — up to @flush_interval of history. Acceptable for a
+  # home sinkhole query log.
+  @flush_interval :timer.seconds(5)
+  @flush_threshold 50
 
   # 10-minute buckets over a rolling 24h window (144 buckets) for the chart.
   @bucket_seconds 600
@@ -238,6 +251,15 @@ defmodule EliHole.DNS.QueryLog do
     {ds, ds}
   end
 
+  @doc false
+  # Whether to mirror entries to Postgres. Off in test, where the app-wide
+  # GenServer boots before any sandbox connection is checked out.
+  def persist? do
+    :eli_hole
+    |> Application.get_env(__MODULE__, [])
+    |> Keyword.get(:persist, true)
+  end
+
   @impl true
   def init(_) do
     :ets.new(@recent_table, [:ordered_set, :named_table, :public, read_concurrency: true])
@@ -258,8 +280,19 @@ defmodule EliHole.DNS.QueryLog do
       write_concurrency: true
     ])
 
+    persist? = persist?()
+
+    if persist? do
+      # Trap exits so terminate/2 runs on graceful shutdown and flushes the
+      # pending write buffer instead of dropping it.
+      Process.flag(:trap_exit, true)
+      rehydrate()
+    end
+
     schedule_prune()
-    {:ok, %{}}
+    if persist?, do: schedule_flush()
+
+    {:ok, %{buffer: [], persist?: persist?}}
   end
 
   @impl true
@@ -269,7 +302,7 @@ defmodule EliHole.DNS.QueryLog do
     aggregate(entry)
     Phoenix.PubSub.broadcast(EliHole.PubSub, "dns:queries", {:new_query, entry})
     prune_recent()
-    {:noreply, state}
+    {:noreply, buffer(state, entry)}
   end
 
   @impl true
@@ -277,16 +310,104 @@ defmodule EliHole.DNS.QueryLog do
     :ets.delete_all_objects(@recent_table)
     :ets.delete_all_objects(@daily_table)
     :ets.delete_all_objects(@series_table)
-    {:noreply, state}
+    if state.persist?, do: safe(fn -> QueryHistory.clear() end)
+    {:noreply, %{state | buffer: []}}
+  end
+
+  @impl true
+  def handle_info(:flush, state) do
+    schedule_flush()
+    {:noreply, flush(state)}
   end
 
   @impl true
   def handle_info(:prune_days, state) do
     prune_days()
     prune_series()
+    if state.persist?, do: safe(fn -> QueryHistory.prune(db_cutoff()) end)
     schedule_prune()
     {:noreply, state}
   end
+
+  @impl true
+  def terminate(_reason, state) do
+    flush(state)
+    :ok
+  end
+
+  # Append the persisted row to the write buffer, flushing once it's full. The
+  # captured `queried_at` is the durable timestamp (the in-memory `:time` field
+  # is only an HH:MM:SS display string).
+  defp buffer(%{persist?: false} = state, _entry), do: state
+
+  defp buffer(%{buffer: buf} = state, entry) do
+    row = Map.put(entry, :queried_at, DateTime.utc_now())
+    state = %{state | buffer: [row | buf]}
+    if length(state.buffer) >= @flush_threshold, do: flush(state), else: state
+  end
+
+  defp flush(%{buffer: []} = state), do: state
+
+  defp flush(%{buffer: buf} = state) do
+    # insert_all wants oldest-first for stable ids; the buffer is newest-first.
+    safe(fn -> QueryHistory.insert_many(Enum.reverse(buf)) end)
+    %{state | buffer: []}
+  end
+
+  # Rebuild the ETS tables from persisted history so a restart keeps the recent
+  # log, the daily aggregates, and the 24h series chart.
+  defp rehydrate do
+    rehydrate_recent()
+    rehydrate_daily()
+    rehydrate_series()
+  rescue
+    e -> Logger.warning("QueryLog rehydrate failed: #{Exception.message(e)}")
+  end
+
+  defp rehydrate_recent do
+    mono = System.monotonic_time()
+    wall = System.system_time(:native)
+
+    @max_recent
+    |> QueryHistory.recent_with_time()
+    |> Enum.with_index()
+    |> Enum.each(fn {{queried_at, entry}, i} ->
+      # Map the wall-clock timestamp into the monotonic frame the ring keys on,
+      # so ordering and the 60s qps gauge stay correct; `- i` keeps keys unique.
+      qn = DateTime.to_unix(queried_at, :native)
+      :ets.insert(@recent_table, {mono - (wall - qn) - i, entry})
+    end)
+  end
+
+  defp rehydrate_daily do
+    today = Date.utc_today()
+    from_date = Date.add(today, -@retention_days)
+
+    from_date
+    |> QueryHistory.daily_counts(today)
+    |> Enum.each(fn {key, count} -> :ets.insert(@daily_table, {key, count}) end)
+  end
+
+  defp rehydrate_series do
+    since = bucket_start(System.system_time(:second)) - (@series_buckets - 1) * @bucket_seconds
+
+    since
+    |> QueryHistory.series_counts()
+    |> Enum.each(fn {key, count} -> :ets.insert(@series_table, {key, count}) end)
+  end
+
+  defp db_cutoff do
+    DateTime.utc_now() |> DateTime.add(-@retention_days, :day)
+  end
+
+  # DB writes are best-effort: a logging failure must never take DNS down.
+  defp safe(fun) do
+    fun.()
+  rescue
+    e -> Logger.warning("QueryLog persistence error: #{Exception.message(e)}")
+  end
+
+  defp schedule_flush, do: Process.send_after(self(), :flush, @flush_interval)
 
   defp aggregate(entry) do
     ds = Date.to_iso8601(Date.utc_today())

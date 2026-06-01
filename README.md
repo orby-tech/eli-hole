@@ -70,8 +70,8 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 
 ### Admin Panel (LiveView)
 - **Dashboard** (`/admin`) — query totals, resolved/blocked/failed counts, queries/sec, a 24h queries-over-time chart (10-min buckets, allowed/blocked/failed stacked), top domains, top clients, cache stats, fastest upstream. A **Today / 7 days / 30 days** period toggle re-scopes the totals, breakdowns, and top lists, and shows a per-day "daily totals" trend chart for the multi-day views
-- **Query Log** (`/admin/queries`) — real-time query stream via PubSub (capped live ring), per-query status/timing/upstream
-- **Long-term statistics** — every stat (totals, status/DNSSEC breakdowns, top domains/clients) comes from per-UTC-day aggregate ETS counters (atomic `update_counter`, 30-day retention), not from scanning a 10k full-entry log. Stat functions take a `Date` or a `Date.Range`; a range sums the daily counters, giving true daily/weekly/monthly figures, while `daily_series/1` feeds the per-day trend chart. The live ring (1k) only feeds the real-time stream and queries/sec gauge
+- **Query Log** (`/admin/queries`) — real-time query stream via PubSub (capped live ring), per-query status/timing/upstream. History is persisted to Postgres (`query_logs`, 30-day retention) and the ETS ring + aggregates are rehydrated on boot, so the log survives a restart
+- **Long-term statistics** — every stat (totals, status/DNSSEC breakdowns, top domains/clients) comes from per-UTC-day aggregate ETS counters (atomic `update_counter`, 30-day retention), not from scanning a 10k full-entry log. Stat functions take a `Date` or a `Date.Range`; a range sums the daily counters, giving true daily/weekly/monthly figures, while `daily_series/1` feeds the per-day trend chart. The live ring (1k) only feeds the real-time stream and queries/sec gauge. All three ETS tables are mirrored to Postgres and rebuilt on restart (`EliHole.DNS.QueryHistory`)
 - **Blocklist** (`/admin/blocklist`) — search, add/edit/delete entries, toggle enable/disable, pagination
 - **Whitelist** (`/admin/whitelist`) — allowlist domains that bypass the blocklist; search, CRUD, bulk import, pagination
 - **Gravity** (`/admin/gravity`) — adlist management, add/remove URLs, trigger update, view status
@@ -175,7 +175,7 @@ Client DNS query (UDP)
         |
   DNS.SpeedTracker (weighted upstream selection)
         |
-  DNS.QueryLog (ETS, PubSub broadcast)
+  DNS.QueryLog (ETS + Postgres-backed, PubSub broadcast)
         |  (off critical path) DNSSEC.Validator — chain-of-trust from root
         |                      tags each query secure / insecure / bogus
         |
@@ -194,7 +194,8 @@ Client DNS query (UDP)
 | `EliHole.DNS.SpeedTracker` | Upstream latency tracking + weighted selection |
 | `EliHole.DNS.RateLimiter` | Per-client (source-IP) query throttling (ETS atomic counters, off by default) |
 | `EliHole.DNS.Gravity` | Scheduled adlist download and sync |
-| `EliHole.DNS.QueryLog` | ETS query history + PubSub broadcast |
+| `EliHole.DNS.QueryLog` | ETS query history + PubSub broadcast, mirrored to Postgres |
+| `EliHole.DNS.QueryHistory` | Postgres persistence + restart rehydration for the query log |
 | `EliHole.DNSSEC.Validator` | Chain-of-trust validation root→name (secure/insecure/bogus) |
 | `EliHole.DNSSEC.Client` | DNSKEY/DS fetch (DO bit, UDP+TCP) + ETS cache |
 | `EliHole.DNSSEC.Config` | DNSSEC enforcement toggle (ETS + DB-persisted) |
@@ -291,7 +292,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 ### Admin Panel
 - [ ] **Query log filtering** — filter by client, domain, status, type
 - [ ] **Client groups** — group clients with different blocklist rules
-- [ ] **Query log persistence** — store history in Postgres (currently ETS, lost on restart)
 - [ ] **Redirect pi-hole admin URLs** — redirect `/#/*` to EliHole's admin paths
 
 ### Operations

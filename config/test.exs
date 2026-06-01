@@ -23,6 +23,11 @@ config :eli_hole, EliHoleWeb.Endpoint,
 # listener in dot_server_test, so keep the supervision-tree one out of test.
 config :eli_hole, start_dot_server?: false
 
+# The app-wide QueryLog boots before any test checks out a sandbox connection,
+# so disable its Postgres mirroring here. The persistence layer itself is
+# covered directly via EliHole.DNS.QueryHistory in query_history_test.exs.
+config :eli_hole, EliHole.DNS.QueryLog, persist: false
+
 # In test we don't send emails
 config :eli_hole, EliHole.Mailer, adapter: Swoosh.Adapters.Test
 
