@@ -1,7 +1,7 @@
 defmodule EliHole.DNS.Resolver do
   import Bitwise
 
-  alias EliHole.DNS.{Blocklist, Cache, LocalDNS, SpeedTracker, Whitelist}
+  alias EliHole.DNS.{Blocklist, Cache, LocalDNS, PauseControl, SpeedTracker, Whitelist}
   alias EliHole.DNSSEC.{Client, Validator}
 
   require Logger
@@ -44,8 +44,12 @@ defmodule EliHole.DNS.Resolver do
     end
   end
 
+  # Single block predicate for both the direct query path and the CNAME-cloaking
+  # check. A global pause short-circuits to "not blocked"; the whitelist always
+  # overrides the blocklist.
   defp blocked_domain?(domain) do
-    Blocklist.blocked?(domain) and not Whitelist.allowed?(domain)
+    not PauseControl.paused?() and Blocklist.blocked?(domain) and
+      not Whitelist.allowed?(domain)
   end
 
   # CNAME cloaking defense: a clean-looking domain may resolve through a CNAME

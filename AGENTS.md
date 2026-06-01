@@ -20,6 +20,7 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole/dns/query_log.ex` — ETS query history with PubSub broadcast
 - `lib/eli_hole/dns/whitelist.ex` — Whitelist GenServer: ETS allowlist (`allowed?/1` bypasses blocklist), CRUD, bulk import
 - `lib/eli_hole/dns/whitelist_entry.ex` — WhitelistEntry Ecto schema (exact/wildcard/regex)
+- `lib/eli_hole/dns/pause_control.ex` — PauseControl GenServer: global "pause blocking for N minutes". ETS-cached `paused_until` unix deadline (hot path: `Resolver.blocked_domain?/1` short-circuits to not-blocked when `paused?/0`), persisted to `dns_settings` (key `pause_until`, survives restart mid-pause), PubSub `dns:pause`, auto-resume timer at expiry; `remaining/0` self-heals to 0 once the deadline passes. Whitelist/local DNS/cache unaffected. Controlled from the dashboard.
 - `lib/eli_hole/dns/adlist.ex` — Adlist Ecto schema (subscription URLs)
 - `lib/eli_hole/dns/adlists.ex` — Adlist CRUD context
 - `lib/eli_hole/dns/gravity.ex` — Gravity GenServer: scheduled + manual adlist download/sync

@@ -1,7 +1,7 @@
 defmodule EliHoleWeb.DashboardLive do
   use EliHoleWeb, :live_view
 
-  alias EliHole.DNS.{Cache, QueryLog, SpeedTracker}
+  alias EliHole.DNS.{Cache, PauseControl, QueryLog, SpeedTracker}
 
   @refresh_interval 2_000
 
@@ -9,10 +9,15 @@ defmodule EliHoleWeb.DashboardLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:queries")
+      Phoenix.PubSub.subscribe(EliHole.PubSub, "dns:pause")
       schedule_refresh()
     end
 
-    {:ok, socket |> assign(:active_nav, :dashboard) |> assign_stats()}
+    {:ok,
+     socket
+     |> assign(:active_nav, :dashboard)
+     |> assign(:pause, PauseControl.status())
+     |> assign_stats()}
   end
 
   @impl true
@@ -21,9 +26,34 @@ defmodule EliHoleWeb.DashboardLive do
   end
 
   @impl true
+  def handle_info({:pause_changed, status}, socket) do
+    {:noreply, assign(socket, :pause, status)}
+  end
+
+  @impl true
   def handle_info(:refresh, socket) do
     schedule_refresh()
-    {:noreply, assign_stats(socket)}
+    # Recompute pause status each tick so the countdown ticks down even without
+    # a PubSub message, and so it self-resets the instant the deadline passes.
+    {:noreply, socket |> assign(:pause, PauseControl.status()) |> assign_stats()}
+  end
+
+  @impl true
+  def handle_event("pause", %{"minutes" => minutes}, socket) do
+    case Integer.parse(minutes) do
+      {n, _} when n > 0 ->
+        PauseControl.pause(n)
+        {:noreply, assign(socket, :pause, PauseControl.status())}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("resume", _params, socket) do
+    PauseControl.resume()
+    {:noreply, assign(socket, :pause, PauseControl.status())}
   end
 
   defp schedule_refresh do
@@ -54,6 +84,55 @@ defmodule EliHoleWeb.DashboardLive do
     <Layouts.app flash={@flash} active_nav={@active_nav}>
       <div class="space-y-6">
         <h1 class="text-2xl font-bold">Dashboard</h1>
+
+        <div
+          id="pause-control"
+          class={[
+            "rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 transition-colors",
+            if(@pause.paused?, do: "bg-warning/20 border border-warning", else: "bg-base-200")
+          ]}
+        >
+          <div class="flex items-center gap-3">
+            <.icon
+              name={if @pause.paused?, do: "hero-pause-circle", else: "hero-shield-check"}
+              class={["size-6", if(@pause.paused?, do: "text-warning", else: "text-success")]}
+            />
+            <div>
+              <div class="font-semibold">
+                <%= if @pause.paused? do %>
+                  Blocking paused
+                <% else %>
+                  Blocking active
+                <% end %>
+              </div>
+              <div class="text-sm opacity-60">
+                <%= if @pause.paused? do %>
+                  Resumes in <span class="tabular-nums">{format_remaining(@pause.remaining)}</span>
+                <% else %>
+                  All blocklists enforced
+                <% end %>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <%= if @pause.paused? do %>
+              <button id="resume-blocking" phx-click="resume" class="btn btn-sm btn-primary">
+                Resume now
+              </button>
+            <% else %>
+              <span class="text-sm opacity-60 shrink-0">Pause for</span>
+              <button
+                :for={m <- [1, 5, 15, 60]}
+                id={"pause-#{m}m"}
+                phx-click="pause"
+                phx-value-minutes={m}
+                class="btn btn-sm btn-outline"
+              >
+                {if m < 60, do: "#{m}m", else: "1h"}
+              </button>
+            <% end %>
+          </div>
+        </div>
 
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div class="bg-base-200 rounded-xl p-4">
@@ -174,6 +253,12 @@ defmodule EliHoleWeb.DashboardLive do
     </Layouts.app>
     """
   end
+
+  defp format_remaining(seconds) when seconds > 0 do
+    "#{div(seconds, 60)}:#{seconds |> rem(60) |> to_string() |> String.pad_leading(2, "0")}"
+  end
+
+  defp format_remaining(_), do: "0:00"
 
   defp bar_width(_count, []), do: 0
 

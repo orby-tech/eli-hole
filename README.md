@@ -28,6 +28,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - **Wildcard match** — `*.example.com` blocks all subdomains
 - **Regex match** — `/(ads|tracking)\..*\.com/`
 - **CNAME deep inspection** — inspects the answer section of resolved responses and blocks clean-looking domains whose CNAME target points to a blocked domain (CNAME cloaking defense); whitelist still overrides
+- **Pause blocking** — temporarily disable all blocking for 1/5/15/60 minutes from the dashboard; live countdown, auto-resumes at expiry, survives a restart, whitelist/local DNS/cache unaffected
 - ETS-backed lookup for sub-millisecond blocking decisions
 - Manual blocklist entry CRUD with search and pagination
 - Bulk import from hosts-file or domain-list formats
@@ -289,7 +290,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 ### Admin Panel
 - [ ] **Query log filtering** — filter by client, domain, status, type
 - [ ] **Time-series chart** — queries over time on dashboard
-- [ ] **Pause blocking** — "disable for N minutes" toggle
 - [ ] **Client groups** — group clients with different blocklist rules
 - [ ] **Query log persistence** — store history in Postgres (currently ETS, lost on restart)
 - [ ] **Long-term statistics** — daily/weekly/monthly aggregates

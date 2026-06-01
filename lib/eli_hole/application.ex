@@ -30,6 +30,7 @@ defmodule EliHole.Application do
         EliHole.DNSSEC.Config,
         EliHole.DNS.Blocklist,
         EliHole.DNS.Whitelist,
+        EliHole.DNS.PauseControl,
         EliHole.DNS.LocalDNS,
         EliHole.DNS.SpeedTracker,
         EliHole.DNS.RateLimiter,
