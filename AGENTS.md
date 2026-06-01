@@ -51,6 +51,10 @@ This is a DNS sinkhole web application (Pi-hole analog) built with the Phoenix w
 - `lib/eli_hole_web/live/local_dns_live.ex` — local DNS record management at `/admin/local-dns`
 - `lib/eli_hole_web/live/cluster_live.ex` — cluster management at `/admin/cluster`
 - `lib/eli_hole_web/controllers/cluster_controller.ex` — cluster API endpoints (register, stats, config)
+- `lib/eli_hole/health.ex` — `Health.check/0`: DB ping (`SELECT 1`) + `Process.whereis` liveness of `DNS.Server`/`Cache`/`QueryLog`; pure `summarize/1` rolls per-component results into `:ok | :degraded`
+- `lib/eli_hole/metrics.ex` — `Metrics.prometheus_text/0`: Prometheus v0.0.4 text exposition from `QueryLog`/`Cache`/`Health`. All series are **gauges** (the ETS query log is a capped rolling window, not monotonic)
+- `lib/eli_hole_web/controllers/health_controller.ex` — `GET /api/health` (`:api` pipeline): 200 ok / 503 degraded JSON
+- `lib/eli_hole_web/controllers/metrics_controller.ex` — `GET /metrics` (no auth/session): `text/plain; version=0.0.4` exposition
 - `lib/eli_hole_web/plugs/cluster_auth.ex` — API key auth for cluster endpoints
 
 ## Project guidelines

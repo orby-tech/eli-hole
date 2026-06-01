@@ -72,6 +72,18 @@ defmodule EliHoleWeb.Router do
     get "/config", ClusterController, :get_config
   end
 
+  scope "/api", EliHoleWeb do
+    pipe_through :api
+
+    get "/health", HealthController, :index
+  end
+
+  # Prometheus scrape target. Plain GET, no session/auth — the controller sets
+  # the `text/plain; version=0.0.4` exposition content-type itself.
+  scope "/", EliHoleWeb do
+    get "/metrics", MetricsController, :index
+  end
+
   if Application.compile_env(:eli_hole, :dev_routes) do
     import Phoenix.LiveDashboard.Router
 

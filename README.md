@@ -84,6 +84,8 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Auth-protected `/admin/*` routes
 
 ### Observability
+- **Health check** — `GET /api/health` returns JSON (`{"status":"ok"|"degraded","checks":{...}}`) probing the database and core DNS GenServers; `200` healthy / `503` degraded for orchestrator probes (Docker/k8s)
+- **Prometheus metrics** — `GET /metrics` text exposition (v0.0.4): per-status query counts, queries/sec, DNSSEC verdicts, cache entries/TTL, component liveness
 - Sentry/GlitchTip integration for error tracking
 - Phoenix LiveDashboard in dev mode (`/dev/dashboard`)
 - Telemetry metrics
@@ -282,7 +284,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 
 ### Core DNS
 - [x] **DNSSEC validation** — full chain-of-trust validation from the ICANN root, shown per query in the admin log (secure/insecure/bogus); see [`docs/DNSSEC.md`](docs/DNSSEC.md). _Remaining: SERVFAIL enforcement on bogus, NSEC/NSEC3 denial-of-existence._
-- [x] **Rate limiting** — optional per-client (source-IP) query throttling; excess refused (REFUSED) before upstream, logged as `rate_limited`, configurable at `/admin/settings`
 - [ ] **Conditional forwarding** — route specific domains to specific upstreams
 
 ### Admin Panel
@@ -296,8 +297,6 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 - [ ] **Redirect pi-hole admin URLs** — redirect `/#/*` to EliHole's admin paths
 
 ### Operations
-- [ ] **Health check endpoint** — `GET /api/health`
-- [ ] **Prometheus metrics** — export via `/metrics`
 - [ ] **Systemd unit** — production service file
 - [ ] **LiveView tests** — currently zero LiveView test coverage
 - [ ] **CI pipeline** — GitHub Actions / Forgejo Actions
