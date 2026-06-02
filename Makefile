@@ -5,9 +5,76 @@ define load_env
 	set -a && [ -f .env ] && source .env && set +a
 endef
 
-.PHONY: setup server iex deps db.create db.migrate db.rollback db.reset db.seed test test.watch routes clean gen.secret gen.migration gen.context gen.live precommit lint dialyzer dev.validate dev.validate.encrypted
+.PHONY: setup server iex deps db.create db.migrate db.rollback db.reset db.seed test test.watch routes clean gen.secret gen.migration gen.context gen.live precommit lint dialyzer dev.validate dev.validate.encrypted git.pull deploy.build deploy.build.nocache deploy.up deploy.prune deploy.ps deploy.logs deploy.restart deploy.migrate deploy.down update update.hard update.nobuild update.restart redeploy redeploy.hard redeploy.nobuild redeploy.restart
+
+# Compose binary: v2 plugin by default. Override: make update COMPOSE=docker-compose
+COMPOSE ?= docker compose
+# Service to (re)build/restart on deploy.
+APP_SERVICE ?= app
 
 setup: deps hooks.install db.create db.migrate
+
+# ── Deploy building blocks (compose into update variants below) ─────────────
+git.pull:
+	git pull --ff-only
+
+deploy.build:
+	$(COMPOSE) build $(APP_SERVICE)
+
+deploy.build.nocache:
+	$(COMPOSE) build --no-cache --pull $(APP_SERVICE)
+
+deploy.up:
+	$(COMPOSE) up -d
+
+deploy.prune:
+	docker image prune -f
+
+deploy.ps:
+	$(COMPOSE) ps
+
+deploy.restart:
+	$(COMPOSE) restart $(APP_SERVICE)
+
+# Run migrations inside the running app container. Normally redundant — the
+# entrypoint runs EliHole.Release.migrate() on every (re)start — but useful to
+# apply migrations WITHOUT a restart, or after a `*.nobuild` no-op `up -d`.
+deploy.migrate:
+	$(COMPOSE) exec $(APP_SERVICE) bin/eli_hole eval "EliHole.Release.migrate()"
+
+deploy.down:
+	$(COMPOSE) down
+
+# Follow app logs (e.g. after an update).
+deploy.logs:
+	$(COMPOSE) logs -f $(APP_SERVICE)
+
+# ── Update variants (migrations auto-run on release boot via rel/overlays) ──
+# Default: pull code, rebuild app image (layer cache), recreate, prune dangling.
+update: git.pull deploy.build deploy.up deploy.prune deploy.ps
+
+# Clean rebuild: no Docker layer cache, re-pull base images. Use when cache stale.
+update.hard: git.pull deploy.build.nocache deploy.up deploy.prune deploy.ps
+
+# Pull code + recreate WITHOUT rebuilding (e.g. image comes from a registry).
+# Explicit migrate: a no-op `up -d` won't recreate the container → no entrypoint.
+update.nobuild: git.pull deploy.up deploy.migrate deploy.ps
+
+# Pull code + just restart the app container (config/env-only change, no rebuild).
+update.restart: git.pull deploy.restart deploy.ps
+
+# ── Redeploy variants (no git pull — use current working tree / pushed image) ─
+# Rebuild app image from current tree, recreate, prune dangling.
+redeploy: deploy.build deploy.up deploy.prune deploy.ps
+
+# Clean rebuild (no cache) from current tree.
+redeploy.hard: deploy.build.nocache deploy.up deploy.prune deploy.ps
+
+# Recreate WITHOUT rebuild (e.g. pull newer image from registry first).
+redeploy.nobuild: deploy.up deploy.migrate deploy.ps
+
+# Restart only — no pull, no rebuild (env/config-only change already on disk).
+redeploy.restart: deploy.restart deploy.ps
 
 dev.validate:
 	dig @127.0.0.1 -p 5354 google.com
