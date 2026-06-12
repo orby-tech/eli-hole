@@ -5,6 +5,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 ## Features
 
 ### DNS Engine
+
 - UDP DNS server with upstream forwarding via `:gen_udp`
 - **DNS-over-HTTPS (DoH, RFC 8484)** — `GET /dns-query?dns=<base64url>` and `POST` (`application/dns-message`); TLS terminated by the endpoint or a reverse proxy
 - **DNS-over-TLS (DoT, RFC 7858)** — TLS listener (default port 853), length-prefixed framing, keep-alive with idle timeout; auto-disabled until a cert/key is configured
@@ -17,6 +18,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - All transports (UDP / DoT / DoH) share one `DNS.Handler` — blocking, caching, DNSSEC, and rate limiting behave identically; each query is tagged with its transport in the log
 
 ### Local DNS
+
 - Custom domain-to-IP mappings (A, AAAA, CNAME records)
 - ETS-backed lookup — resolved before upstream forwarding
 - Admin UI at `/admin/local-dns` with CRUD, search, pagination
@@ -24,6 +26,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Included in teleporter export/import
 
 ### Blocking
+
 - **Exact match** — `ads.example.com`
 - **Wildcard match** — `*.example.com` blocks all subdomains
 - **Regex match** — `/(ads|tracking)\..*\.com/`
@@ -34,6 +37,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Bulk import from hosts-file or domain-list formats
 
 ### Whitelist
+
 - **Allowlist** — whitelisted domains always bypass the blocklist, even when a blocklist rule matches
 - Same matching modes as blocking: exact / wildcard / regex
 - ETS-backed lookup, evaluated before serving a blocked response
@@ -41,6 +45,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Included in teleporter export/import and cluster sync
 
 ### Gravity (Adlist Sync)
+
 - Subscribe to remote adlist URLs (same format as Pi-hole)
 - Scheduled auto-update every 24 hours
 - Manual "Update Now" from admin UI
@@ -49,6 +54,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Per-adlist domain count tracking
 
 ### Cluster (Master-Slave)
+
 - **Push-based replication** — master pushes config to slaves on change
 - **Stats aggregation** — slaves push query stats to master every 30s
 - **Auto-registration** — slaves register with master on startup, get initial config
@@ -61,6 +67,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Roles: `standalone` (default), `master`, `slave` — set via `INSTANCE_ROLE` env var
 
 ### Teleporter (Import/Export)
+
 - Import Pi-hole teleporter backups (`.tar.gz`)
   - Blacklists (exact + regex), whitelists (exact + regex), DNS providers, adlists, local DNS (`custom.list`)
   - Reports skipped items (clients, groups)
@@ -69,6 +76,7 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - Auto-detect backup format (Pi-hole vs EliHole)
 
 ### Admin Panel (LiveView)
+
 - **Dashboard** (`/admin`) — query totals, resolved/blocked/failed counts, queries/sec, a 24h queries-over-time chart (10-min buckets, allowed/blocked/failed stacked), top domains, top clients, cache stats, fastest upstream. A **Today / 7 days / 30 days** period toggle re-scopes the totals, breakdowns, and top lists, and shows a per-day "daily totals" trend chart for the multi-day views
 - **Query Log** (`/admin/queries`) — real-time query stream via PubSub (capped live ring), per-query status/timing/upstream. History is persisted to Postgres (`query_logs`, 30-day retention) and the ETS ring + aggregates are rehydrated on boot, so the log survives a restart
 - **Long-term statistics** — every stat (totals, status/DNSSEC breakdowns, top domains/clients) comes from per-UTC-day aggregate ETS counters (atomic `update_counter`, 30-day retention), not from scanning a 10k full-entry log. Stat functions take a `Date` or a `Date.Range`; a range sums the daily counters, giving true daily/weekly/monthly figures, while `daily_series/1` feeds the per-day trend chart. The live ring (1k) only feeds the real-time stream and queries/sec gauge. All three ETS tables are mirrored to Postgres and rebuilt on restart (`EliHole.DNS.QueryHistory`)
@@ -80,12 +88,14 @@ DNS sinkhole built with Elixir and Phoenix. Like Pi-hole, but in Elixir.
 - **Settings** (`/admin/settings`) — DNSSEC enforcement toggle, rate-limiting toggle + queries/sec, upstream DNS providers (presets: Google/Cloudflare/Quad9 + custom), cache TTL, flush cache, upstream speed table, teleporter import/export
 
 ### Auth
+
 - Admin user via `ADMIN_USERNAME` / `ADMIN_PASSWORD` env vars (min 8 chars for password)
 - Session-based login with password hashing (bcrypt)
 - First-run setup page at `/setup`
 - Auth-protected `/admin/*` routes
 
 ### Observability
+
 - **Health check** — `GET /api/health` returns JSON (`{"status":"ok"|"degraded","checks":{...}}`) probing the database and core DNS GenServers; `200` healthy / `503` degraded for orchestrator probes (Docker/k8s)
 - **Prometheus metrics** — `GET /metrics` text exposition (v0.0.4): per-status query counts, queries/sec, DNSSEC verdicts, cache entries/TTL, component liveness
 - Sentry/GlitchTip integration for error tracking
@@ -133,27 +143,27 @@ make dev.validate.encrypted            # smoke-test DoH (GET/POST) + DoT against
 
 ## Configuration
 
-| Variable | Default | Description |
-|---|---|---|
-| `DNS_PORT` | `5354` | UDP port for DNS server |
-| `DNS_UPSTREAMS` | `8.8.8.8:53,8.8.4.4:53` | Comma-separated upstream DNS servers |
-| `PHX_PORT` / `PORT` | `4410` | Web UI port |
-| `PHX_HOST` | `localhost` | Hostname for URL generation |
-| `PHX_SCHEME` | `http` | URL scheme (`http` or `https` behind reverse proxy) |
-| `DATABASE_URL` | (dev default) | PostgreSQL connection string |
-| `SECRET_KEY_BASE` | (required) | Phoenix secret key |
-| `ADMIN_USERNAME` | (none) | Admin username (created on startup) |
-| `ADMIN_PASSWORD` | (none) | Admin password (min 8 characters) |
-| `FORCE_SSL` | `false` | Set `true` behind TLS-terminating reverse proxy |
-| `DOT_PORT` | `853` | DNS-over-TLS listener port (use >1024 to run without root) |
-| `DOT_CERT_PATH` | (none) | TLS certificate (PEM) — DoT disabled until set + present |
-| `DOT_KEY_PATH` | (none) | TLS private key (PEM) — DoT disabled until set + present |
-| `SENTRY_DSN` | (none) | GlitchTip/Sentry DSN for error tracking |
-| `INSTANCE_ROLE` | `standalone` | Cluster role: `master`, `slave`, or `standalone` |
-| `CLUSTER_API_KEY` | (none) | Shared secret for cluster API auth |
-| `CLUSTER_MASTER_URL` | (none) | Master URL (slave only), e.g. `http://master:4000` |
-| `INSTANCE_NAME` | auto | Node name for cluster identification |
-| `INSTANCE_URL` | (none) | This instance's URL reachable by master (slave only) |
+| Variable             | Default                 | Description                                                |
+| -------------------- | ----------------------- | ---------------------------------------------------------- |
+| `DNS_PORT`           | `5354`                  | UDP port for DNS server                                    |
+| `DNS_UPSTREAMS`      | `8.8.8.8:53,8.8.4.4:53` | Comma-separated upstream DNS servers                       |
+| `PHX_PORT` / `PORT`  | `4410`                  | Web UI port                                                |
+| `PHX_HOST`           | `localhost`             | Hostname for URL generation                                |
+| `PHX_SCHEME`         | `http`                  | URL scheme (`http` or `https` behind reverse proxy)        |
+| `DATABASE_URL`       | (dev default)           | PostgreSQL connection string                               |
+| `SECRET_KEY_BASE`    | (required)              | Phoenix secret key                                         |
+| `ADMIN_USERNAME`     | (none)                  | Admin username (created on startup)                        |
+| `ADMIN_PASSWORD`     | (none)                  | Admin password (min 8 characters)                          |
+| `FORCE_SSL`          | `false`                 | Set `true` behind TLS-terminating reverse proxy            |
+| `DOT_PORT`           | `853`                   | DNS-over-TLS listener port (use >1024 to run without root) |
+| `DOT_CERT_PATH`      | (none)                  | TLS certificate (PEM) — DoT disabled until set + present   |
+| `DOT_KEY_PATH`       | (none)                  | TLS private key (PEM) — DoT disabled until set + present   |
+| `SENTRY_DSN`         | (none)                  | GlitchTip/Sentry DSN for error tracking                    |
+| `INSTANCE_ROLE`      | `standalone`            | Cluster role: `master`, `slave`, or `standalone`           |
+| `CLUSTER_API_KEY`    | (none)                  | Shared secret for cluster API auth                         |
+| `CLUSTER_MASTER_URL` | (none)                  | Master URL (slave only), e.g. `http://master:4000`         |
+| `INSTANCE_NAME`      | auto                    | Node name for cluster identification                       |
+| `INSTANCE_URL`       | (none)                  | This instance's URL reachable by master (slave only)       |
 
 ## Architecture
 
@@ -184,29 +194,29 @@ Client DNS query (UDP)
 
 ### Key Modules
 
-| Module | Role |
-|---|---|
-| `EliHole.DNS.Server` | UDP listener (GenServer, `:gen_udp`) |
-| `EliHole.DNS.Resolver` | Race resolution + fallback forwarding |
-| `EliHole.DNS.Cache` | ETS response cache with TTL |
-| `EliHole.DNS.Blocklist` | ETS-backed domain blocking (exact/wildcard/regex) |
-| `EliHole.DNS.Whitelist` | ETS-backed allowlist; bypasses blocklist (exact/wildcard/regex) |
-| `EliHole.DNS.SpeedTracker` | Upstream latency tracking + weighted selection |
-| `EliHole.DNS.RateLimiter` | Per-client (source-IP) query throttling (ETS atomic counters, off by default) |
-| `EliHole.DNS.Gravity` | Scheduled adlist download and sync |
-| `EliHole.DNS.QueryLog` | ETS query history + PubSub broadcast, mirrored to Postgres |
-| `EliHole.DNS.QueryHistory` | Postgres persistence + restart rehydration for the query log |
-| `EliHole.DNSSEC.Validator` | Chain-of-trust validation root→name (secure/insecure/bogus) |
-| `EliHole.DNSSEC.Client` | DNSKEY/DS fetch (DO bit, UDP+TCP) + ETS cache |
-| `EliHole.DNSSEC.Config` | DNSSEC enforcement toggle (ETS + DB-persisted) |
-| `EliHole.DNSSEC.Denial` | NSEC/NSEC3 denial-of-existence (anti-downgrade) |
-| `EliHole.DNS.LocalDNS` | Custom local domain records (ETS GenServer) |
-| `EliHole.DNS.Teleporter` | Pi-hole/EliHole backup import/export |
-| `EliHole.DNS.Providers` | Upstream DNS provider CRUD |
-| `EliHole.DNS.Cluster` | Cluster context: config export/import, node CRUD, push logic |
-| `EliHole.DNS.ClusterManager` | Master GenServer: PubSub → debounced push to slaves, stats ETS |
-| `EliHole.DNS.ClusterSync` | Slave GenServer: register with master, push stats periodically |
-| `EliHole.Accounts` | Admin user management |
+| Module                       | Role                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `EliHole.DNS.Server`         | UDP listener (GenServer, `:gen_udp`)                                          |
+| `EliHole.DNS.Resolver`       | Race resolution + fallback forwarding                                         |
+| `EliHole.DNS.Cache`          | ETS response cache with TTL                                                   |
+| `EliHole.DNS.Blocklist`      | ETS-backed domain blocking (exact/wildcard/regex)                             |
+| `EliHole.DNS.Whitelist`      | ETS-backed allowlist; bypasses blocklist (exact/wildcard/regex)               |
+| `EliHole.DNS.SpeedTracker`   | Upstream latency tracking + weighted selection                                |
+| `EliHole.DNS.RateLimiter`    | Per-client (source-IP) query throttling (ETS atomic counters, off by default) |
+| `EliHole.DNS.Gravity`        | Scheduled adlist download and sync                                            |
+| `EliHole.DNS.QueryLog`       | ETS query history + PubSub broadcast, mirrored to Postgres                    |
+| `EliHole.DNS.QueryHistory`   | Postgres persistence + restart rehydration for the query log                  |
+| `EliHole.DNSSEC.Validator`   | Chain-of-trust validation root→name (secure/insecure/bogus)                   |
+| `EliHole.DNSSEC.Client`      | DNSKEY/DS fetch (DO bit, UDP+TCP) + ETS cache                                 |
+| `EliHole.DNSSEC.Config`      | DNSSEC enforcement toggle (ETS + DB-persisted)                                |
+| `EliHole.DNSSEC.Denial`      | NSEC/NSEC3 denial-of-existence (anti-downgrade)                               |
+| `EliHole.DNS.LocalDNS`       | Custom local domain records (ETS GenServer)                                   |
+| `EliHole.DNS.Teleporter`     | Pi-hole/EliHole backup import/export                                          |
+| `EliHole.DNS.Providers`      | Upstream DNS provider CRUD                                                    |
+| `EliHole.DNS.Cluster`        | Cluster context: config export/import, node CRUD, push logic                  |
+| `EliHole.DNS.ClusterManager` | Master GenServer: PubSub → debounced push to slaves, stats ETS                |
+| `EliHole.DNS.ClusterSync`    | Slave GenServer: register with master, push stats periodically                |
+| `EliHole.Accounts`           | Admin user management                                                         |
 
 ## Docker
 
@@ -222,14 +232,86 @@ docker compose up -d
 
 Migrations run automatically on startup. Ports are configured via `.env`:
 
-| Variable | Default | Description |
-|---|---|---|
-| `PHX_PORT` | `4410` | Web UI port on host |
-| `DNS_PORT` | `5354` | DNS UDP port on host |
+| Variable   | Default | Description          |
+| ---------- | ------- | -------------------- |
+| `PHX_PORT` | `4410`  | Web UI port on host  |
+| `DNS_PORT` | `5354`  | DNS UDP port on host |
 
 Postgres binds to `127.0.0.1:5432` only (not exposed externally).
 
 Default admin credentials: `admin` / `administrator` — change via env vars for production.
+
+### Deploy to a remote host
+
+Requirements on the host: Docker + **Compose v2** (`docker compose`, _not_ the legacy
+`docker-compose` v1 — v1 fails on the `${VAR:?}` interpolation in `docker-compose.yml`).
+If only v1 is present, drop the v2 plugin into `~/.docker/cli-plugins/docker-compose`
+(no root needed).
+
+```bash
+# on the host
+git clone <repo-url> eli-hole && cd eli-hole
+cp .env.example .env
+# set SECRET_KEY_BASE (openssl rand -base64 48), PHX_HOST,
+# ADMIN_PASSWORD, DNS_PORT, DNS_UPSTREAMS
+docker compose up -d        # builds image, starts Postgres + app, auto-migrates
+```
+
+**Binding DNS to port 53.** The app container runs as a non-root user, so it cannot bind
+a privileged port (`<1024`) in host-network mode. To serve DNS on the standard port 53, either:
+
+- run the app as root via a `docker-compose.override.yml`, then set `DNS_PORT=53`:
+  ```yaml
+  services:
+    app:
+      user: "0:0"
+  ```
+- or keep `DNS_PORT=5354` (default) and redirect 53→5354 with iptables (see below).
+
+**Low-RAM hosts.** The Elixir release build is memory-hungry (>1 GB peak). On a small box,
+build the image on a beefier machine and ship it instead of building on the host:
+
+```bash
+# on build machine
+docker build -t eli-hole-app .
+docker save eli-hole-app | gzip | ssh HOST 'gunzip | docker load'
+# on host: docker compose up -d   (reuses the loaded image, skips the build)
+```
+
+**Updating:** `git pull && docker compose up -d --build` (migrations re-run on boot).
+The `Makefile` wraps this as `make update` / `make redeploy`.
+
+### Production cluster (master/slave)
+
+For a real (non-demo) cluster, set matching env on each node. All nodes share one
+`CLUSTER_API_KEY` (auth is an `x-cluster-key` header, validated in **both** directions),
+and master and slave must reach each other's web port.
+
+Master `.env`:
+
+```
+INSTANCE_ROLE=master
+CLUSTER_API_KEY=<shared-secret>
+INSTANCE_NAME=<name>
+```
+
+Slave `.env`:
+
+```
+INSTANCE_ROLE=slave
+CLUSTER_API_KEY=<shared-secret>          # identical to master
+CLUSTER_MASTER_URL=http://<master-host>:4410
+INSTANCE_URL=http://<this-host>:4410     # reachable by master, for config push-back
+INSTANCE_NAME=<name>
+```
+
+Recreate the app container after editing `.env` (`docker compose up -d`). On boot the slave
+registers with the master and pulls its config (adlists/blocklist/whitelist); the master then
+debounce-pushes config on every change and the slave pushes stats every 30s. Confirm with the
+slave log line `Registered with master successfully` and `/admin/cluster` on the master.
+
+> **Gotcha:** a `.env` without a trailing newline glues an appended variable onto the last
+> line. End the file with a newline before appending (`sed -i -e '$a\' .env`).
 
 ### Cluster Demo (Master + 2 Slaves)
 
@@ -239,15 +321,16 @@ docker compose -f docker-compose.demo.yml up --build
 
 Opens 3 instances on a bridge network:
 
-| Instance | Web UI | DNS |
-|---|---|---|
-| Master | http://localhost:4410 | `dig @127.0.0.1 -p 5354 google.com` |
-| Slave 1 | http://localhost:4411 | `dig @127.0.0.1 -p 5355 google.com` |
-| Slave 2 | http://localhost:4412 | `dig @127.0.0.1 -p 5356 google.com` |
+| Instance | Web UI                | DNS                                 |
+| -------- | --------------------- | ----------------------------------- |
+| Master   | http://localhost:4410 | `dig @127.0.0.1 -p 5354 google.com` |
+| Slave 1  | http://localhost:4411 | `dig @127.0.0.1 -p 5355 google.com` |
+| Slave 2  | http://localhost:4412 | `dig @127.0.0.1 -p 5356 google.com` |
 
 Login: `admin` / `administrator`. Open `/admin/cluster` on each instance to see cluster status.
 
 **Demo flow:**
+
 1. Add an adlist or blocklist entry on master
 2. Config auto-pushes to both slaves (~3s debounce)
 3. Query DNS on slaves → stats appear on master's Cluster page
@@ -271,7 +354,7 @@ Then set your router's DHCP DNS to the host IP.
 
 ```bash
 sudo mkdir -p /etc/systemd/resolved.conf.d
-echo -e "[Resolve]\nDNS=192.168.12.135\nDNSOverTLS=no" | sudo tee /etc/systemd/resolved.conf.d/elihole.conf
+echo -e "[Resolve]\nDNS=<elihole-host-ip>\nDNSOverTLS=no" | sudo tee /etc/systemd/resolved.conf.d/elihole.conf
 sudo systemctl restart systemd-resolved
 ```
 
@@ -286,19 +369,23 @@ Note: binding to port 53 requires root or `CAP_NET_BIND_SERVICE`.
 ## TODO
 
 ### Core DNS
+
 - [x] **DNSSEC validation** — full chain-of-trust validation from the ICANN root, shown per query in the admin log (secure/insecure/bogus); see [`docs/DNSSEC.md`](docs/DNSSEC.md). _Remaining: SERVFAIL enforcement on bogus, NSEC/NSEC3 denial-of-existence._
 - [ ] **Conditional forwarding** — route specific domains to specific upstreams
 
 ### Admin Panel
+
 - [ ] **Query log filtering** — filter by client, domain, status, type
 - [ ] **Client groups** — group clients with different blocklist rules
 - [ ] **Redirect pi-hole admin URLs** — redirect `/#/*` to EliHole's admin paths
 
 ### Operations
+
 - [ ] **Systemd unit** — production service file
 - [ ] **LiveView tests** — currently zero LiveView test coverage
 - [ ] **CI pipeline** — GitHub Actions / Forgejo Actions
 
 ### Polish
+
 - [ ] **Notification on gravity failure** — alert when adlist download fails
 - [ ] **API for external integrations** — REST/JSON API for blocklist/stats
