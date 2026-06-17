@@ -35,6 +35,10 @@ eli_hole-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Mix inter-process lock/pubsub dirs (created at runtime, never commit).
+/mix_lock_*/
+/mix_pubsub_*/
+
 # Environment
 .env
 
